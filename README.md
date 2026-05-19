@@ -24,7 +24,7 @@ npm run build
 
 ## API 接口
 
-前端代理配置：`/api` → `http://localhost:32023`
+前端代理配置：`/api` → `http://localhost:8080`
 
 ### 认证 `/api/auth`
 
