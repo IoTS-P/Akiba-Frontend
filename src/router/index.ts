@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instance'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -11,9 +12,15 @@ const router = createRouter({
       meta: { guest: true }
     },
     {
+      path: '/select-instance',
+      name: 'select-instance',
+      component: () => import('@/views/SelectInstance.vue'),
+      meta: { requiresAuth: true, skipInstanceCheck: true }
+    },
+    {
       path: '/',
       component: () => import('@/components/Layout.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresInstance: true },
       children: [
         {
           path: '',
@@ -31,6 +38,11 @@ const router = createRouter({
           component: () => import('@/views/Scripts.vue')
         },
         {
+          path: 'agent',
+          name: 'agent',
+          component: () => import('@/views/Agent.vue')
+        },
+        {
           path: 'workflows',
           name: 'workflows',
           component: () => import('@/views/Workflows.vue')
@@ -44,6 +56,11 @@ const router = createRouter({
           path: 'query',
           name: 'query',
           component: () => import('@/views/Query.vue')
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/Settings.vue')
         }
       ]
     }
@@ -52,20 +69,27 @@ const router = createRouter({
 
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
-  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
-  const isGuest = to.matched.some((record) => record.meta.guest)
+  const instanceStore = useInstanceStore()
+  const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  const isGuest = to.matched.some((r) => r.meta.guest)
+  const requiresInstance = to.matched.some((r) => r.meta.requiresInstance)
 
   if (requiresAuth && !authStore.isAuthenticated) {
     await authStore.checkAuth()
   }
 
   if (isGuest && authStore.isAuthenticated) {
-    next({ name: 'dashboard' })
-  } else if (requiresAuth && !authStore.isAuthenticated) {
-    next({ name: 'login' })
-  } else {
-    next()
+    return next({ name: 'dashboard' })
   }
+  if (requiresAuth && !authStore.isAuthenticated) {
+    return next({ name: 'login' })
+  }
+  // After auth: if the page expects an active instance and none is set,
+  // route the user through the selection page first.
+  if (requiresInstance && !instanceStore.hasSelection) {
+    return next({ name: 'select-instance' })
+  }
+  next()
 })
 
 export default router

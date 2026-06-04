@@ -3,23 +3,39 @@
     <div class="actions">
       <div class="input-group">
         <input v-model="newInstanceName" placeholder="Instance name" @keyup.enter="createInstance" />
-        <button @click="createInstance" :disabled="loading || !newInstanceName">Create</button>
+        <button @click="createInstance" :disabled="creating || !newInstanceName">
+          {{ creating ? 'Creating…' : 'Create' }}
+        </button>
       </div>
+      <button class="btn-secondary" @click="store.refresh">Refresh</button>
     </div>
-    <div v-if="loading" class="loading">Loading...</div>
-    <div v-else-if="instances.length === 0" class="empty">No instances found</div>
+
+    <div v-if="store.loading" class="loading">Loading...</div>
+    <div v-else-if="store.available.length === 0" class="empty">
+      No instances found. Create one above.
+    </div>
     <div v-else class="table-wrapper">
       <table class="table">
         <thead>
           <tr>
             <th>Name</th>
+            <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="instance in instances" :key="instance">
+          <tr v-for="instance in store.available" :key="instance">
             <td>{{ instance }}</td>
             <td>
+              <span v-if="instance === store.selected" class="status active">selected</span>
+              <span v-else class="status muted">available</span>
+            </td>
+            <td>
+              <button
+                v-if="instance !== store.selected"
+                @click="store.select(instance)"
+                class="btn-action"
+              >Select</button>
               <button @click="startInstance(instance)" class="btn-action">Start</button>
               <button @click="shutdownInstance(instance)" class="btn-action">Shutdown</button>
               <button @click="backupInstance(instance)" class="btn-action">Backup</button>
@@ -29,66 +45,64 @@
         </tbody>
       </table>
     </div>
+
     <div v-if="message" :class="['message', messageType]">{{ message }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { instanceApi } from '@/services/api'
+import { useInstanceStore } from '@/stores/instance'
 
-const instances = ref<string[]>([])
+const router = useRouter()
+const store = useInstanceStore()
+
 const newInstanceName = ref('')
-const loading = ref(false)
+const creating = ref(false)
 const message = ref('')
-const messageType = ref('success')
+const messageType = ref<'success' | 'error'>('success')
 
 onMounted(async () => {
-  await loadInstances()
+  await store.refresh()
 })
-
-async function loadInstances() {
-  loading.value = true
-  try {
-    const response = await instanceApi.list()
-    instances.value = response.data.instances || []
-  } catch (e) {
-    showMessage('Failed to load instances', 'error')
-  } finally {
-    loading.value = false
-  }
-}
 
 async function createInstance() {
   if (!newInstanceName.value) return
-  loading.value = true
+  const name = newInstanceName.value.trim()
+  creating.value = true
   try {
-    await instanceApi.create(newInstanceName.value)
-    showMessage('Instance created', 'success')
+    await instanceApi.create(name)
+    store.select(name)
     newInstanceName.value = ''
-    await loadInstances()
+    showMessage(`Instance "${name}" created`, 'success')
+    await store.refresh()
   } catch (e: any) {
-    showMessage(e.response?.data?.instanceName || 'Failed to create instance', 'error')
+    showMessage(
+      e?.response?.data?.message || e?.response?.data?.error || 'Failed to create instance',
+      'error'
+    )
   } finally {
-    loading.value = false
+    creating.value = false
   }
 }
 
 async function startInstance(name: string) {
   try {
     await instanceApi.start(name)
-    showMessage('Instance started', 'success')
+    showMessage(`Instance "${name}" started`, 'success')
   } catch (e: any) {
-    showMessage(e.response?.data?.message || 'Failed to start instance', 'error')
+    showMessage(e?.response?.data?.error || 'Failed to start instance', 'error')
   }
 }
 
 async function shutdownInstance(name: string) {
   try {
     await instanceApi.shutdown(name)
-    showMessage('Instance shutdown', 'success')
+    showMessage(`Instance "${name}" shutdown`, 'success')
   } catch (e: any) {
-    showMessage(e.response?.data?.message || 'Failed to shutdown instance', 'error')
+    showMessage(e?.response?.data?.error || 'Failed to shutdown instance', 'error')
   }
 }
 
@@ -97,7 +111,7 @@ async function backupInstance(name: string) {
     await instanceApi.backup(name)
     showMessage('Backup created', 'success')
   } catch (e: any) {
-    showMessage(e.response?.data?.message || 'Failed to create backup', 'error')
+    showMessage(e?.response?.data?.error || 'Failed to create backup', 'error')
   }
 }
 
@@ -105,10 +119,16 @@ async function deleteInstance(name: string) {
   if (!confirm(`Delete instance "${name}"?`)) return
   try {
     await instanceApi.delete(name)
-    showMessage('Instance deleted', 'success')
-    await loadInstances()
+    const wasSelected = store.selected === name
+    store.forget(name)
+    showMessage(`Instance "${name}" deleted`, 'success')
+    if (wasSelected) {
+      router.push('/select-instance')
+    } else {
+      await store.refresh()
+    }
   } catch (e: any) {
-    showMessage(e.response?.data?.message || 'Failed to delete instance', 'error')
+    showMessage(e?.response?.data?.error || 'Failed to delete instance', 'error')
   }
 }
 
@@ -129,12 +149,16 @@ function showMessage(msg: string, type: 'success' | 'error') {
 
 .actions {
   margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .input-group {
   display: flex;
   gap: 10px;
-  max-width: 400px;
+  flex: 1;
+  max-width: 420px;
 }
 
 .input-group input {
@@ -153,10 +177,15 @@ function showMessage(msg: string, type: 'success' | 'error') {
   border-radius: 6px;
   cursor: pointer;
 }
+.input-group button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.input-group button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.btn-secondary {
+  padding: 10px 16px;
+  background: #f5f5f5;
+  color: #333;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
 .loading, .empty {
@@ -165,30 +194,24 @@ function showMessage(msg: string, type: 'success' | 'error') {
   color: #999;
 }
 
-.table-wrapper {
-  overflow-x: auto;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
+.table-wrapper { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; }
 .table th, .table td {
   padding: 14px 16px;
   text-align: left;
   border-bottom: 1px solid #eee;
 }
+.table th { font-weight: 600; color: #666; font-size: 14px; }
+.table td { color: #333; }
 
-.table th {
-  font-weight: 600;
-  color: #666;
-  font-size: 14px;
+.status {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-weight: 500;
 }
-
-.table td {
-  color: #333;
-}
+.status.active { background: #fff5f7; color: #e94560; }
+.status.muted { background: #f5f5f5; color: #888; }
 
 .btn-action {
   padding: 6px 12px;
@@ -200,20 +223,9 @@ function showMessage(msg: string, type: 'success' | 'error') {
   cursor: pointer;
   transition: all 0.2s;
 }
-
-.btn-action:hover {
-  background: #f5f5f5;
-}
-
-.btn-action.danger {
-  color: #e94560;
-  border-color: #e94560;
-}
-
-.btn-action.danger:hover {
-  background: #e94560;
-  color: #fff;
-}
+.btn-action:hover { background: #f5f5f5; }
+.btn-action.danger { color: #e94560; border-color: #e94560; }
+.btn-action.danger:hover { background: #e94560; color: #fff; }
 
 .message {
   margin-top: 16px;
@@ -221,14 +233,6 @@ function showMessage(msg: string, type: 'success' | 'error') {
   border-radius: 6px;
   font-size: 14px;
 }
-
-.message.success {
-  background: #e8f5e9;
-  color: #388e3c;
-}
-
-.message.error {
-  background: #ffebee;
-  color: #d32f2f;
-}
+.message.success { background: #e8f5e9; color: #388e3c; }
+.message.error { background: #ffebee; color: #d32f2f; }
 </style>

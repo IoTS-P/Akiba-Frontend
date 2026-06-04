@@ -16,11 +16,36 @@ export interface InstanceResponse {
 export interface Script {
   id: number
   name: string
+  description?: string | null
   code: string
+  codeSize?: number | null
+  language?: string | null
   output: string | null
+  outputSize?: number | null
   status: string
+  saveResult?: boolean | null
+  maxOutputSize?: number | null
   createdAt: string
   finishedAt: string | null
+}
+
+export interface ScriptExecution {
+  id: number
+  scriptId: number
+  binaryId: number | null
+  status: string | null
+  output: string | null
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface ScriptRunResponse {
+  executionId: number
+  scriptId: number
+  binaryIds: number[]
+  status: string
+  message: string
 }
 
 export interface WorkflowStatus {
@@ -39,4 +64,31 @@ export interface QueryResponse {
 export interface FileResponse {
   message: string
   fileIds: number[]
+}
+
+// ---- Agent (chat) ----------------------------------------------------------
+
+export interface AgentSession {
+  sessionId: string
+  sessionName: string | null
+  status: string
+  modelName: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface AgentMessage {
+  messageId: number
+  messageIndex: number
+  role: 'user' | 'assistant' | string
+  content: string | null
+  createdAt: string | null
+}
+
+export interface ChatTurnResponse {
+  sessionId: string
+  userMessage: AgentMessage
+  assistantMessage: AgentMessage
+  iterations: number
+  tokenUsage: { input: number; output: number } | null
 }

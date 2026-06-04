@@ -15,6 +15,10 @@
           <span class="icon">📜</span>
           <span>Scripts</span>
         </router-link>
+        <router-link to="/agent" class="nav-item">
+          <span class="icon">💬</span>
+          <span>Agent</span>
+        </router-link>
         <router-link to="/workflows" class="nav-item">
           <span class="icon">⚙️</span>
           <span>Workflows</span>
@@ -27,8 +31,19 @@
           <span class="icon">🔍</span>
           <span>Query</span>
         </router-link>
+        <router-link to="/settings" class="nav-item">
+          <span class="icon">⚙️</span>
+          <span>Settings</span>
+        </router-link>
       </nav>
       <div class="sidebar-footer">
+        <div class="instance-info">
+          <div class="label">Instance</div>
+          <div class="value" :title="instanceStore.selected || ''">
+            {{ instanceStore.selected || '—' }}
+          </div>
+          <button class="switch-btn" @click="switchInstance">Switch</button>
+        </div>
         <div class="user-info">
           <span>{{ authStore.user?.username }}</span>
         </div>
@@ -50,24 +65,34 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instance'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const instanceStore = useInstanceStore()
 
 const currentRoute = computed(() => {
   const names: Record<string, string> = {
     dashboard: 'Dashboard',
     instances: 'Instances',
     scripts: 'Scripts',
+    agent: 'Agent',
     workflows: 'Workflows',
     files: 'Files',
-    query: 'Query'
+    query: 'Query',
+    settings: 'Settings'
   }
   return names[route.name as string] || 'Akiba'
 })
 
+function switchInstance() {
+  instanceStore.clear()
+  router.push('/select-instance')
+}
+
 async function handleLogout() {
+  instanceStore.clear()
   await authStore.logout()
   router.push('/login')
 }
@@ -128,6 +153,42 @@ async function handleLogout() {
   font-size: 14px;
   margin-bottom: 10px;
   color: #a0a0a0;
+}
+
+.instance-info {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #2a2a3e;
+}
+.instance-info .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+  margin-bottom: 4px;
+}
+.instance-info .value {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 500;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switch-btn {
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  color: #a0a0a0;
+  border: 1px solid #3a3a4e;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.switch-btn:hover {
+  color: #e94560;
+  border-color: #e94560;
 }
 
 .logout-btn {
