@@ -6,43 +6,66 @@
     </div>
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else-if="scripts.length === 0" class="empty">No scripts yet</div>
-    <div v-else class="table-wrapper">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Name</th>
-            <th>Language</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="script in scripts" :key="script.id">
-            <td>{{ script.id }}</td>
-            <td>
-              <div class="name-cell">
-                <span class="name">{{ script.name }}</span>
-                <span v-if="script.description" class="desc">{{ script.description }}</span>
-              </div>
-            </td>
-            <td>{{ script.language || '—' }}</td>
-            <td>
-              <span :class="['status', script.status || 'unknown']">
-                {{ script.status || 'unknown' }}
-              </span>
-            </td>
-            <td>{{ formatDate(script.createdAt) }}</td>
-            <td class="actions-cell">
-              <button @click="viewScript(script)" class="btn-action">View</button>
-              <button @click="openRunModal(script)" class="btn-action">Run</button>
-              <button @click="deleteScript(script)" class="btn-action danger">Delete</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <template v-else>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Language</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="script in sortedScripts" :key="script.id">
+              <td>{{ script.id }}</td>
+              <td>
+                <div class="name-cell">
+                  <span class="name">{{ script.name }}</span>
+                  <span v-if="script.description" class="desc">{{ script.description }}</span>
+                </div>
+              </td>
+              <td>{{ script.language || '—' }}</td>
+              <td>
+                <span :class="['status', script.status || 'unknown']">
+                  {{ script.status || 'unknown' }}
+                </span>
+              </td>
+              <td>{{ formatDate(script.createdAt) }}</td>
+              <td class="actions-cell">
+                <button @click="viewScript(script)" class="btn-action">View</button>
+                <button @click="openRunModal(script)" class="btn-action">Run</button>
+                <button @click="deleteScript(script)" class="btn-action danger">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination">
+        <button
+          class="btn-secondary small"
+          :disabled="currentPage <= 1"
+          @click="currentPage--"
+        >
+          &laquo; Prev
+        </button>
+        <span class="page-info">
+          Page {{ currentPage }} / {{ totalPages }} ({{ scripts.length }} scripts)
+        </span>
+        <button
+          class="btn-secondary small"
+          :disabled="currentPage >= totalPages"
+          @click="currentPage++"
+        >
+          Next &raquo;
+        </button>
+      </div>
+    </template>
 
     <!-- Create modal -->
     <div v-if="showCreateModal" class="modal" @click.self="showCreateModal = false">
@@ -87,10 +110,23 @@
       </div>
     </div>
 
-    <!-- Run modal -->
+    <!-- Run modal with parameter inputs -->
     <div v-if="showRunModal" class="modal" @click.self="showRunModal = false">
       <div class="modal-content">
         <h2>Run "{{ selectedScript?.name }}"</h2>
+
+        <!-- Parsed parameters from script header comments -->
+        <div v-if="parsedParams.length > 0" class="params-section">
+          <label class="section-label">Parameters</label>
+          <div v-for="(p, i) in parsedParams" :key="i" class="form-group">
+            <label>{{ p.name }} <span class="hint">— {{ p.description }}</span></label>
+            <input
+              v-model="paramValues[p.name]"
+              :placeholder="p.description"
+            />
+          </div>
+        </div>
+
         <div class="form-group">
           <label>Binary IDs (comma-separated, leave empty to run without a binary)</label>
           <input v-model="runForm.binaryIdsRaw" placeholder="e.g. 1, 2, 3" />
@@ -156,12 +192,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { scriptApi } from '@/services/api'
 import type { Script, ScriptExecution } from '@/types'
 
+const PAGE_SIZE = 20
+
 const scripts = ref<Script[]>([])
 const loading = ref(false)
+const currentPage = ref(1)
 
 const showCreateModal = ref(false)
 const showRunModal = ref(false)
@@ -189,12 +228,25 @@ const runForm = ref({
   parallel: true
 })
 
+// Parsed parameters from script header
+const parsedParams = ref<Array<{ name: string; description: string }>>([])
+const paramValues = ref<Record<string, string>>({})
+
+// Sort scripts by ID ascending
+const sortedScripts = computed(() => {
+  return [...scripts.value].sort((a, b) => a.id - b.id)
+})
+
+const totalPages = computed(() => {
+  return Math.max(1, Math.ceil(sortedScripts.value.length / PAGE_SIZE))
+})
+
 onMounted(loadScripts)
 
 async function loadScripts() {
   loading.value = true
   try {
-    const { data } = await scriptApi.list()
+    const { data } = await scriptApi.list(10000, 0) // Load all for client-side pagination
     scripts.value = data.scripts || []
   } catch (e) {
     console.error('Failed to load scripts:', e)
@@ -245,10 +297,44 @@ async function createScript() {
   }
 }
 
+/**
+ * Parse script header comments for @param annotations.
+ *
+ * Recognised formats (in block comments at top of script):
+ *   @param name Description of the parameter
+ *   @param name (type) Description
+ *   // @param name Description  (line comments after block)
+ */
+function parseScriptParams(code: string): Array<{ name: string; description: string }> {
+  const params: Array<{ name: string; description: string }> = []
+  // Match lines with @param
+  const regex = /(?:^|\n)\s*(?:\/\/|[*#])\s*@param\s+(\w+)\s*(?:\([^)]*\)\s*)?(.*?)(?:\n|$)/gi
+  let match
+  while ((match = regex.exec(code)) !== null) {
+    const name = match[1].trim()
+    const description = match[2].trim() || name
+    if (name && !params.find((p) => p.name === name)) {
+      params.push({ name, description })
+    }
+  }
+  return params
+}
+
 function openRunModal(script: Script) {
   selectedScript.value = script
   runForm.value = { binaryIdsRaw: '', parallel: true }
   runError.value = ''
+
+  // Parse parameters from the script's code
+  const params = parseScriptParams(script.code)
+  parsedParams.value = params
+  paramValues.value = {}
+
+  // Initialize param values
+  for (const p of params) {
+    paramValues.value[p.name] = ''
+  }
+
   showRunModal.value = true
 }
 
@@ -280,7 +366,6 @@ async function viewScript(script: Script) {
   executions.value = []
   executionsLoading.value = true
   try {
-    // Refresh the script in case the output has changed.
     const { data } = await scriptApi.get(script.id)
     selectedScript.value = data
   } catch (e) {
@@ -345,6 +430,8 @@ function formatDate(date: string | null | undefined) {
   border-radius: 6px;
   cursor: pointer;
 }
+.btn-secondary.small { padding: 6px 14px; font-size: 13px; }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .loading, .empty {
   text-align: center;
@@ -407,6 +494,39 @@ function formatDate(date: string | null | undefined) {
 
 .btn-action.danger { color: #e94560; border-color: #e94560; }
 .btn-action.danger:hover { background: #e94560; color: #fff; }
+
+/* ---- Pagination ---- */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+.page-info {
+  font-size: 13px;
+  color: #666;
+}
+
+/* ---- Params Section ---- */
+.params-section {
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.section-label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.hint { color: #888; font-weight: 400; font-size: 12px; }
 
 .modal {
   position: fixed;

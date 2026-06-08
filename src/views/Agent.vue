@@ -3,7 +3,7 @@
     <aside class="session-list">
       <div class="session-header">
         <h3>Sessions</h3>
-        <button class="btn-primary small" @click="createSession" :disabled="creatingSession">
+        <button class="btn-primary small" @click="openNewSessionModal" :disabled="creatingSession">
           {{ creatingSession ? '…' : '+ New' }}
         </button>
       </div>
@@ -70,13 +70,65 @@
         </form>
       </template>
     </main>
+
+    <!-- New session file selector modal -->
+    <div v-if="showNewModal" class="modal" @click.self="showNewModal = false">
+      <div class="modal-content wide">
+        <h2>New Agent Session</h2>
+        <p class="subtitle">Select a binary file to analyze, or skip to start an empty session.</p>
+
+        <div class="form-group">
+          <label>Search files</label>
+          <div class="search-row">
+            <input
+              v-model="fileSearchQuery"
+              placeholder="Search by name, ID, architecture…"
+              @keydown.enter="searchFiles"
+              class="search-input"
+            />
+            <button class="btn-secondary" @click="searchFiles" :disabled="searching">
+              {{ searching ? 'Searching…' : 'Search' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="searchError" class="error">{{ searchError }}</div>
+
+        <div v-if="searchResults.length > 0" class="file-list">
+          <div
+            v-for="f in searchResults"
+            :key="f.id"
+            :class="['file-item', { selected: selectedFile?.id === f.id }]"
+            @click="selectedFile = f"
+          >
+            <div class="file-name">{{ f.name }}</div>
+            <div class="file-meta">
+              <span class="tag">ID: {{ f.id }}</span>
+              <span v-if="f.arch" class="tag">{{ f.arch }}</span>
+              <span v-if="f.format" class="tag">{{ f.format }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="fileSearchQuery && !searching" class="muted small">
+          No matching files found.
+        </div>
+
+        <div class="modal-actions">
+          <button @click="showNewModal = false" class="btn-secondary">Cancel</button>
+          <button @click="createSession" class="btn-primary" :disabled="creatingSession">
+            {{ creatingSession ? 'Creating…' : selectedFile ? `Analyze "${selectedFile.name}"` : 'Start Empty' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
-import { agentApi } from '@/services/api'
+import { agentApi, fileApi } from '@/services/api'
 import type { AgentSession, AgentMessage } from '@/types'
+import type { FileSearchResult } from '@/services/api'
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
@@ -90,6 +142,14 @@ const errorMsg = ref('')
 const input = ref('')
 
 const messagesEl = ref<HTMLElement | null>(null)
+
+// ---- New session modal -----------------------------------------------------
+const showNewModal = ref(false)
+const fileSearchQuery = ref('')
+const searchResults = ref<FileSearchResult[]>([])
+const searching = ref(false)
+const searchError = ref('')
+const selectedFile = ref<FileSearchResult | null>(null)
 
 onMounted(async () => {
   await loadSessions()
@@ -110,12 +170,41 @@ async function loadSessions() {
   }
 }
 
+function openNewSessionModal() {
+  showNewModal.value = true
+  fileSearchQuery.value = ''
+  searchResults.value = []
+  searchError.value = ''
+  selectedFile.value = null
+}
+
+async function searchFiles() {
+  if (!fileSearchQuery.value.trim()) return
+  searching.value = true
+  searchError.value = ''
+  try {
+    const { data } = await fileApi.search(fileSearchQuery.value.trim())
+    searchResults.value = data.files || []
+  } catch (e: any) {
+    searchError.value = e?.response?.data?.error || e?.message || 'Search failed.'
+    searchResults.value = []
+  } finally {
+    searching.value = false
+  }
+}
+
 async function createSession() {
   creatingSession.value = true
   errorMsg.value = ''
   try {
-    const { data } = await agentApi.createSession({})
+    const payload: any = {}
+    if (selectedFile.value) {
+      payload.binaryId = selectedFile.value.id
+      payload.sessionName = `Analysis of ${selectedFile.value.name}`
+    }
+    const { data } = await agentApi.createSession(payload)
     sessions.value.unshift(data)
+    showNewModal.value = false
     await selectSession(data.sessionId)
   } catch (e: any) {
     errorMsg.value = e?.response?.data?.error || e?.message || 'Failed to create session.'
@@ -421,4 +510,100 @@ function formatDate(date: string | null | undefined) {
   padding: 14px;
 }
 .muted.small { font-size: 13px; }
+
+/* ---- New Session Modal ---------------------------------------------------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-content {
+  background: #fff;
+  padding: 30px;
+  border-radius: 10px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-content.wide { width: 650px; }
+.modal-content h2 { margin-bottom: 6px; font-size: 20px; }
+.subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
+
+.form-group { margin-bottom: 16px; }
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.search-row {
+  display: flex;
+  gap: 10px;
+}
+.search-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.file-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+.file-item:hover { background: #fafafa; }
+.file-item.selected { background: #fff5f7; border-left: 3px solid #e94560; }
+.file-item:last-child { border-bottom: none; }
+.file-name { font-size: 14px; font-weight: 500; }
+.file-meta { display: flex; gap: 6px; align-items: center; }
+.tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.btn-secondary {
+  padding: 10px 20px;
+  background: #f5f5f5;
+  color: #333;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) { background: #eee; }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.error {
+  color: #d32f2f;
+  font-size: 13px;
+  margin: 8px 0;
+}
 </style>

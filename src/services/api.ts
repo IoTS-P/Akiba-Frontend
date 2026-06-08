@@ -148,12 +148,36 @@ export interface FileEntry {
   originalPath?: string
 }
 
+export interface FileListResponse {
+  files: FileEntry[]
+  total: number
+  offset: number
+  limit: number
+}
+
 export const fileApi = {
-  import: (files: string[]) =>
-    api.post<{ message: string; fileIds: number[] }>('/files/import', { files }),
-  list: () => api.get<{ files: FileEntry[] }>('/files'),
+  import: (formData: FormData) =>
+    api.post<{ message: string; fileIds: number[] }>('/files/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  list: (offset = 0, limit = 20) =>
+    api.get<FileListResponse>('/files', { params: { offset, limit } }),
+  search: (query: string) =>
+    api.get<{ files: FileSearchResult[]; query: string }>('/files/search', {
+      params: { q: query }
+    }),
   delete: (fileIds: number[]) =>
     api.delete<{ message: string }>('/files', { data: { fileIds } })
+}
+
+export interface FileSearchResult {
+  id: number
+  name: string
+  originalPath?: string
+  arch?: string | null
+  format?: string | null
+  compilerSpec?: string | null
+  checksum?: string | null
 }
 
 export const queryApi = {
@@ -197,6 +221,31 @@ export const llmConfigApi = {
     api.delete<{ message: string }>('/llm/keys', { params: { provider, modelName } }),
   fetchModels: (provider: string, apiKey: string, baseUrl?: string) =>
     api.get<{ models: string[] }>('/llm/models', { params: { provider, baseUrl, apiKey } })
+}
+
+// ---- Runtime configuration --------------------------------------------------
+
+export interface RuntimeConfigEntry {
+  name: string
+  description?: string
+  json: string
+  updatedAt: string
+}
+
+export const runtimeConfigApi = {
+  list: () => api.get<{ configs: RuntimeConfigEntry[] }>('/runtime-configs'),
+  get: (name: string) => api.get<RuntimeConfig>(`/runtime-configs/${name}`),
+  save: (payload: { name: string; description?: string; json: string }) =>
+    api.put<{ message: string }>('/runtime-configs', payload),
+  delete: (name: string) =>
+    api.delete<{ message: string }>(`/runtime-configs/${name}`)
+}
+
+export interface RuntimeConfig {
+  name: string
+  description?: string
+  json: string
+  updatedAt: string
 }
 
 export default api

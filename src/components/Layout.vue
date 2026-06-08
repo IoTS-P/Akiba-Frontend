@@ -101,16 +101,22 @@ async function handleLogout() {
 <style scoped>
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
   width: 220px;
+  min-width: 220px;
   background: #1a1a2e;
   color: #fff;
   display: flex;
   flex-direction: column;
   padding: 20px 0;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
 }
 
 .logo {
@@ -210,6 +216,7 @@ async function handleLogout() {
   flex: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
