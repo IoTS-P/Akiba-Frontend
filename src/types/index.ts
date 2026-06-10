@@ -83,6 +83,8 @@ export interface AgentMessage {
   role: 'user' | 'assistant' | string
   content: string | null
   createdAt: string | null
+  toolName?: string
+  toolResult?: string
 }
 
 export interface ChatTurnResponse {

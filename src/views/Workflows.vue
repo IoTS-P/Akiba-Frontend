@@ -212,12 +212,24 @@ async function stopWorkflow(id: string) {
 }
 
 // ---- Log viewer (SSE) ------------------------------------------------------
-function openLogViewer(id: string, initialStatus: string) {
+async function openLogViewer(id: string, initialStatus: string) {
   logWorkflowId.value = id
   logLines.value = []
   logStatus.value = initialStatus as 'running' | 'completed' | 'failed'
   showLogModal.value = true
 
+  // First, fetch persistent log history
+  try {
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    const baseUrl = `${protocol}//${window.location.host}/api`
+    const resp = await fetch(`${baseUrl}/workflow/logs/${id}`)
+    const data = await resp.json()
+    if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
+      logLines.value = data.logs
+    }
+  } catch (_e: any) { /* ignore */ }
+
+  // Then connect SSE for real-time updates
   const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
   const baseUrl = `${protocol}//${window.location.host}/api`
   const es = new EventSource(`${baseUrl}/workflow/stream/${id}`)
@@ -234,7 +246,24 @@ function openLogViewer(id: string, initialStatus: string) {
 // ---- Detail panel (SSE) ----------------------------------------------------
 let detailEventSource: EventSource | null = null
 
-function openDetail(id: string, initialStatus: string) {
+function parseFileProgress(line: string, files: Array<{ id: number; status: string }>) {
+  // Parse [FILES] 1,2,3,4,5
+  if (line.startsWith('[FILES] ')) {
+    const ids = line.slice(8).split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n))
+    return ids.map((id: number) => ({ id, status: 'pending' as string }))
+  }
+  // Parse [FILE:id] status
+  const fileMatch = line.match(/^\[FILE:(\d+)\]\s*(.+)$/)
+  if (fileMatch) {
+    const fid = parseInt(fileMatch[1])
+    const fstatus = fileMatch[2].trim()
+    const idx = files.findIndex(f => f.id === fid)
+    if (idx >= 0) files[idx].status = fstatus
+  }
+  return null
+}
+
+async function openDetail(id: string, initialStatus: string) {
   // Close previous SSE if any
   if (detailEventSource) { detailEventSource.close(); detailEventSource = null }
 
@@ -250,25 +279,33 @@ function openDetail(id: string, initialStatus: string) {
 
   const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
   const baseUrl = `${protocol}//${window.location.host}/api`
+
+  // First, load history from persistent log to populate file grid
+  try {
+    const resp = await fetch(`${baseUrl}/workflow/logs/${id}`)
+    const data = await resp.json()
+    if (data.logs && Array.isArray(data.logs)) {
+      for (const line of data.logs) {
+        const result = parseFileProgress(line, detailFiles.value)
+        if (result !== null && result.length > 0) {
+          // Only replace files array if FILES was parsed (first time)
+          if (line.startsWith('[FILES] ')) {
+            detailFiles.value = result
+          }
+        }
+      }
+    }
+  } catch (_e: any) { /* ignore */ }
+
+  // Connect SSE for real-time updates
   detailEventSource = new EventSource(`${baseUrl}/workflow/stream/${id}`)
   detailEventSource.onmessage = (event) => {
     const line = event.data
     if (line === '[DONE]' || line.startsWith('[STATUS]')) return
 
-    // Parse [FILES] 1,2,3,4,5
-    if (line.startsWith('[FILES] ')) {
-      const ids = line.slice(8).split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n))
-      detailFiles.value = ids.map((id: number) => ({ id, status: 'pending' as string }))
-      return
-    }
-
-    // Parse [FILE:id] status
-    const fileMatch = line.match(/^\[FILE:(\d+)\]\s*(.+)$/)
-    if (fileMatch) {
-      const fid = parseInt(fileMatch[1])
-      const fstatus = fileMatch[2].trim()
-      const idx = detailFiles.value.findIndex(f => f.id === fid)
-      if (idx >= 0) detailFiles.value[idx].status = fstatus
+    const result = parseFileProgress(line, detailFiles.value)
+    if (result !== null && result.length > 0) {
+      detailFiles.value = result
       return
     }
 

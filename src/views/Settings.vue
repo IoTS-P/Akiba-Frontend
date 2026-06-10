@@ -21,8 +21,7 @@
                 :key="k.provider + '|' + k.modelNames.join(',') + '|' + (k.baseUrl || '')"
                 :value="idx"
               >
-                {{ k.provider }} / {{ k.modelNames.join(', ') }}
-                {{ k.baseUrl ? ` (${k.baseUrl})` : '' }}
+                {{ k.provider }} / {{ k.modelNames.length }} models{{ k.baseUrl ? ` (${k.baseUrl})` : '' }}
               </option>
             </select>
             <button
@@ -85,30 +84,13 @@
           </div>
 
           <div v-if="availableModels.length" class="form-group">
-            <label>Available models</label>
-            <div class="model-row">
-              <select v-model="selectedModel" class="model-select">
-                <option value="" disabled>— select a model —</option>
-                <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
-              </select>
-              <button
-                type="button"
-                class="btn-secondary"
-                @click="useSelectedModel"
-                :disabled="!selectedModel"
-              >
-                Use selected
-              </button>
+            <label>Models to save</label>
+            <div class="model-checkbox-list">
+              <label v-for="m in availableModels" :key="m" class="model-checkbox-item">
+                <input type="checkbox" :value="m" v-model="selectedModelNames" />
+                {{ m }}
+              </label>
             </div>
-          </div>
-
-          <div class="form-group">
-            <label>Model name</label>
-            <input
-              v-model="form.modelName"
-              placeholder="e.g. deepseek-v4-flash"
-              :disabled="saving"
-            />
           </div>
 
           <div v-if="error" class="error">{{ error }}</div>
@@ -270,7 +252,7 @@
               <select v-model="selectedSavedLlmIdx" class="import-select" @change="importSavedLlm">
                 <option :value="-1">— Select —</option>
                 <option v-for="(k, idx) in keys" :key="idx" :value="idx">
-                  {{ k.provider }} / {{ k.modelNames.join(', ') }}{{ k.baseUrl ? ` (${k.baseUrl})` : '' }}
+                  {{ k.provider }} / {{ k.modelNames.length }} models{{ k.baseUrl ? ` (${k.baseUrl})` : '' }}
                 </option>
               </select>
             </div>
@@ -283,7 +265,19 @@
                   <option v-for="p in llmProviderList" :key="p.value" :value="p.value">{{ p.label }}</option>
                 </select>
               </div>
-              <div class="form-group"><label>Model Name</label><input v-model="gui.llm.modelName" placeholder="deepseek-v4-flash" /></div>
+              <div class="form-group">
+                  <label>Model Name</label>
+                  <div v-if="availableRuntimeModels.length > 0" class="model-row">
+                    <select v-model="gui.llm.modelName" class="model-select">
+                      <option value="" disabled>— select a model —</option>
+                      <option v-for="m in availableRuntimeModels" :key="m" :value="m">{{ m }}</option>
+                    </select>
+                    <button type="button" class="btn-secondary sm" @click="reloadRuntimeModels" :disabled="fetchingRuntimeModels" title="Refresh models">
+                      {{ fetchingRuntimeModels ? '⋯' : '↻' }}
+                    </button>
+                  </div>
+                  <input v-else v-model="gui.llm.modelName" placeholder="deepseek-v4-flash" />
+                </div>
               <div class="form-group"><label>Base URL <span class="hint">(required for LLM, optional for local)</span></label><input v-model="gui.llm.baseUrl" placeholder="e.g. https://api.deepseek.com" /></div>
             </div>
             <div class="form-row">
@@ -308,7 +302,7 @@
             <div v-for="(task, idx) in gui.tasks" :key="idx" class="task-item">
               <div class="form-row">
                 <div class="form-group flex2"><label>Main Class</label><input v-model="task.mainClassName" placeholder="org.iotsplab.akiba.module.AkibaUtils" /></div>
-                <div class="form-group"><label>Timeout (s)</label><input v-model.number="task.timeout" type="number" /></div>
+                <div class="form-group"><label>Timeout (s) <span class="hint">(empty = no limit)</span></label><input :value="task.timeout" @input="(e: any) => { const v = e.target.value; (task as any).timeout = v === '' ? null : Number(v) }" type="number" placeholder="e.g. 600" /></div>
                 <div class="form-group"><label>Table Name</label><input v-model="task.tableName" placeholder="(auto)" /></div>
               </div>
               <div class="form-row">
@@ -318,12 +312,20 @@
                     <option>OFF</option><option>FATAL</option><option>ERROR</option><option>WARN</option><option selected>INFO</option><option>DEBUG</option><option>TRACE</option>
                   </select>
                 </div>
-                <div class="form-group"><label>Config Key</label><input v-model="task.configKey" placeholder="(optional)" /></div>
+                <div class="form-group"><label>Config Key</label><input v-model="task.configKey" placeholder="(auto-set with module config)" /></div>
                 <div class="form-group task-actions">
                   <label>&nbsp;</label>
                   <button class="btn-danger sm" @click="removeTask(idx)" :disabled="gui.tasks.length <= 1">✕</button>
                 </div>
               </div>
+              <!-- Module Config JSON editor -->
+              <details class="task-module-config">
+                <summary>Module Config <span v-if="task.moduleConfig.trim()" class="badge">JSON</span></summary>
+                <div class="form-group" style="margin-top:8px">
+                  <label>Module-specific JSON configuration</label>
+                  <textarea v-model="task.moduleConfig" class="module-json-editor" rows="6" spellcheck="false" placeholder='e.g. {"option1": "value1", "option2": 42}'></textarea>
+                </div>
+              </details>
             </div>
             <button class="btn-secondary sm" @click="addTask" style="margin-top:8px">+ Add Task</button>
           </details>
@@ -374,12 +376,11 @@ const fetchingModels = ref(false)
 const error = ref('')
 const message = ref('')
 const availableModels = ref<string[]>([])
-const selectedModel = ref('')
+const selectedModelNames = ref<string[]>([])
 const selectedConfigIndex = ref(-1) // -1 means "new config"
 
 const form = reactive({
   provider: '',
-  modelName: '',
   apiKey: '',
   baseUrl: ''
 })
@@ -407,27 +408,25 @@ onMounted(async () => {
 
 function populateFormFromKey(key: StoredKeyEntry) {
   form.provider = key.provider
-  form.modelName = key.modelNames[0] || ''
   form.baseUrl = key.baseUrl || ''
   form.apiKey = '' // API key is not returned for security
+  selectedModelNames.value = key.modelNames.filter(Boolean)
+  availableModels.value = key.modelNames.filter(Boolean)
 }
 
 function onConfigSelected() {
   const idx = selectedConfigIndex.value
   if (idx >= 0 && idx < keys.value.length) {
     populateFormFromKey(keys.value[idx])
-    availableModels.value = []
-    selectedModel.value = ''
     error.value = ''
     message.value = ''
   } else {
     // New config — clear form
     form.provider = ''
-    form.modelName = ''
     form.baseUrl = ''
     form.apiKey = ''
     availableModels.value = []
-    selectedModel.value = ''
+    selectedModelNames.value = []
     error.value = ''
     message.value = ''
   }
@@ -450,9 +449,10 @@ async function deleteSelectedConfig() {
     if (keys.value.length === 0) {
       selectedConfigIndex.value = -1
       form.provider = ''
-      form.modelName = ''
       form.baseUrl = ''
       form.apiKey = ''
+      availableModels.value = []
+      selectedModelNames.value = []
     } else {
       selectedConfigIndex.value = 0
       populateFormFromKey(keys.value[0])
@@ -469,7 +469,7 @@ async function fetchModelList() {
   error.value = ''
   message.value = ''
   availableModels.value = []
-  selectedModel.value = ''
+  selectedModelNames.value = []
 
   if (!form.provider || !form.apiKey) {
     error.value = 'Provider and API key are required to fetch models.'
@@ -484,6 +484,8 @@ async function fetchModelList() {
       form.baseUrl || undefined
     )
     availableModels.value = data.models || []
+    // Auto-select all fetched models
+    selectedModelNames.value = [...availableModels.value]
     if (availableModels.value.length === 0) {
       message.value = 'No models returned by the provider.'
     }
@@ -494,17 +496,11 @@ async function fetchModelList() {
   }
 }
 
-function useSelectedModel() {
-  if (selectedModel.value) {
-    form.modelName = selectedModel.value
-  }
-}
-
 async function save() {
   error.value = ''
   message.value = ''
-  if (!form.provider || !form.modelName.trim() || !form.apiKey.trim()) {
-    error.value = 'Provider, model name and API key are required.'
+  if (!form.provider || selectedModelNames.value.length === 0 || !form.apiKey.trim()) {
+    error.value = 'Provider, at least one model, and API key are required.'
     return
   }
 
@@ -512,16 +508,16 @@ async function save() {
   try {
     await llmConfigApi.addKey({
       provider: form.provider,
-      modelName: form.modelName.trim(),
+      modelNames: selectedModelNames.value.map(s => s.trim()).filter(Boolean),
       baseUrl: form.baseUrl?.trim() || undefined,
       apiKey: form.apiKey.trim()
     })
     // Reload keys and auto-select the new/updated entry
     const { data } = await llmConfigApi.keys()
     keys.value = data.keys || []
-    // Try to find the index of the just-saved config
+    // Find the saved entry by matching any of the saved models
     const idx = keys.value.findIndex(
-      (k) => k.provider === form.provider && k.modelNames.includes(form.modelName.trim())
+      (k) => k.provider === form.provider && selectedModelNames.value.some(m => k.modelNames.includes(m))
     )
     selectedConfigIndex.value = idx >= 0 ? idx : 0
     message.value = 'Configuration saved.'
@@ -560,6 +556,14 @@ const computedBinariesRoot = computed(() => {
 
 // Import from saved LLM configs (the keys from the LLM Configuration card above)
 const selectedSavedLlmIdx = ref(-1)
+const availableRuntimeModels = ref<string[]>([])
+const fetchingRuntimeModels = ref(false)
+
+function normalizeModelsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
+  return trimmed.endsWith('/v1') ? `${trimmed}/models` : `${trimmed}/v1/models`
+}
+
 function importSavedLlm() {
   const idx = selectedSavedLlmIdx.value
   if (idx < 0 || idx >= keys.value.length) return
@@ -567,9 +571,35 @@ function importSavedLlm() {
   gui.llm.provider = k.provider
   gui.llm.modelName = k.modelNames[0] || ''
   gui.llm.baseUrl = k.baseUrl || ''
-  // Clear sensitive fields — user must fill them via env var
-  gui.llm.apiKeyEnv = ''
+  // Prefix with 'K_' to ensure the env var name doesn't start with a digit
+  // (POSIX env var names must start with letter or underscore).
+  gui.llm.apiKeyEnv = 'K_' + k.id.substring(0, 8)
   gui.llm.apiKey = ''
+  // Populate model dropdown from the saved config's modelNames directly
+  availableRuntimeModels.value = k.modelNames
+}
+
+async function reloadRuntimeModels() {
+  const baseUrl = gui.llm.baseUrl
+  const apiKey = gui.llm.apiKey
+  if (!baseUrl || !apiKey) return
+  fetchingRuntimeModels.value = true
+  availableRuntimeModels.value = []
+  try {
+    const url = normalizeModelsUrl(baseUrl)
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const body = await resp.json()
+    // OpenAI-compatible response: { data: [{ id: "model-name" }, ...] }
+    const models: string[] = body.data?.map((m: any) => m.id).filter(Boolean) || []
+    availableRuntimeModels.value = models
+  } catch (_e: any) {
+    // keep empty so text input shows
+  } finally {
+    fetchingRuntimeModels.value = false
+  }
 }
 const activeConfig = ref<string | null>(null)
 const runtimeConfigName = ref('')
@@ -583,11 +613,12 @@ const editorMode = ref<'gui' | 'json'>('gui')
 // ---- GUI form model ---------------------------------------------------------
 interface GuiTask {
   mainClassName: string
-  timeout: number
+  timeout: number | null
   consoleLogLevel: string
   fileLogLevel: string
   tableName: string
   configKey: string
+  moduleConfig: string
 }
 const gui = reactive({
   username: 'akiba',
@@ -637,8 +668,8 @@ const gui = reactive({
     debugLogging: false
   },
   tasks: [
-    { mainClassName: 'org.iotsplab.akiba.module.AkibaUtils', timeout: 600, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '' },
-    { mainClassName: 'org.iotsplab.akiba.module.AkibaExample1', timeout: 600, consoleLogLevel: 'DEBUG', fileLogLevel: 'DEBUG', tableName: 'example_table_1', configKey: '' }
+    { mainClassName: 'org.iotsplab.akiba.module.AkibaUtils', timeout: null, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '', moduleConfig: '' },
+    { mainClassName: 'org.iotsplab.akiba.module.AkibaExample1', timeout: null, consoleLogLevel: 'DEBUG', fileLogLevel: 'DEBUG', tableName: 'example_table_1', configKey: '', moduleConfig: '' }
   ] as GuiTask[]
 })
 
@@ -658,10 +689,10 @@ async function loadRuntimeConfigs() {
 // ---- GUI <-> JSON sync ------------------------------------------------------
 
 function guiToJson(): string {
-  const proc: any = {}
-  if (gui.username) proc.username = gui.username
-  if (gui.password) proc.password = gui.password
-  if (gui.usingInstance) proc.usingInstance = gui.usingInstance
+  const mainObj: any = {}
+  if (gui.username) mainObj.username = gui.username
+  if (gui.password) mainObj.password = gui.password
+  if (gui.usingInstance) mainObj.usingInstance = gui.usingInstance
 
   const g = gui.general
   const general: any = {}
@@ -671,9 +702,9 @@ function guiToJson(): string {
   general.threads = g.threads
   if (g.logsRoot) general.logsRoot = g.logsRoot
   if (g.workspaceRoot) general.workspaceRoot = g.workspaceRoot
-  proc.general = general
-  proc.globalConsoleLogLevel = 'OFF'
-  proc.globalFileLogLevel = gui.globalFileLogLevel
+  mainObj.general = general
+  mainObj.globalConsoleLogLevel = 'OFF'
+  mainObj.globalFileLogLevel = gui.globalFileLogLevel
 
   const gp = gui.ghidra
   const gproj: any = { projectRoot: gp.projectRoot, mode: gp.mode, saveProject: gp.saveProject, noCreateProgram: gp.noCreateProgram }
@@ -682,14 +713,14 @@ function guiToJson(): string {
   gproj.forkOnTask = gp.forkOnTask
   gproj.overwriteProject = gp.overwriteProject
   gproj.deletePreviousProgram = gp.deletePreviousProgram
-  proc.withGhidraProject = gproj
+  mainObj.withGhidraProject = gproj
 
   const sql = gui.sqlSource
   const sqlObj: any = { serverIP: sql.serverIP, serverPort: sql.serverPort, useSnapshot: sql.useSnapshot}
   if (sql.constraint) sqlObj.constraint = sql.constraint
   sqlObj.disableUpdate = sql.disableUpdate
   if (sql.useLocalCache) sqlObj.useLocalCache = sql.useLocalCache
-  proc.sqlSource = sqlObj
+  mainObj.sqlSource = sqlObj
 
   // LLM
   if (gui.llm.provider) {
@@ -703,24 +734,65 @@ function guiToJson(): string {
     llm.timeoutSeconds = gui.llm.timeoutSeconds
     llm.maxRetries = gui.llm.maxRetries
     llm.debugLogging = gui.llm.debugLogging
-    proc.llm = llm
+    mainObj.llm = llm
   }
 
-  proc.tasks = gui.tasks.filter(t => t.mainClassName.trim()).map(t => {
+  // Build wrapped structure: {"main": <mainConfig>, "<ModuleName>": <moduleConfig>}
+  const wrapped: any = { main: mainObj }
+
+  // Add module configs at top level
+  gui.tasks.filter(t => t.mainClassName.trim() && t.moduleConfig.trim()).forEach(t => {
+    const moduleName = t.mainClassName.trim().split('.').pop()!
+    try {
+      wrapped[moduleName] = JSON.parse(t.moduleConfig)
+    } catch (_) { /* skip invalid JSON */ }
+  })
+
+  // Build tasks array
+  mainObj.tasks = gui.tasks.filter(t => t.mainClassName.trim()).map(t => {
     const task: any = { mainClassName: t.mainClassName.trim() }
-    if (t.timeout) task.timeout = t.timeout
+    if (t.timeout != null && t.timeout > 0) {
+      task.timeout = t.timeout
+    } else {
+      task.timeout = -1
+    }
     if (t.fileLogLevel && t.fileLogLevel !== 'INFO') task.fileLogLevel = t.fileLogLevel.toLowerCase()
     if (t.tableName.trim()) task.tableName = t.tableName.trim()
-    if (t.configKey.trim()) task.configKey = t.configKey.trim()
+    // Auto-set configKey for tasks with module config
+    const moduleName = t.mainClassName.trim().split('.').pop()!
+    if (t.moduleConfig.trim()) {
+      task.configKey = '@@/' + moduleName
+    } else if (t.configKey.trim()) {
+      task.configKey = t.configKey.trim()
+    }
     return task
   })
 
-  return JSON.stringify(proc, null, 2)
+  return JSON.stringify(wrapped, null, 2)
 }
 
 function jsonToGui(json: string) {
+  const moduleConfigs = new Map<string, string>()
+  let proc: any
   try {
-    const proc = JSON.parse(json)
+    const root = JSON.parse(json)
+    if (!root || typeof root !== 'object') return
+
+    // Check if wrapped format: {"main": {...}, "<Module>": {...}}
+    if (root.main && typeof root.main === 'object') {
+      proc = root.main
+      // Extract module configs from top-level keys (everything except "main")
+      for (const key of Object.keys(root)) {
+        if (key !== 'main' && root[key] && typeof root[key] === 'object') {
+          moduleConfigs.set(key, JSON.stringify(root[key], null, 2))
+        }
+      }
+    } else {
+      proc = root  // Old flat format
+    }
+  } catch (_e: any) { return }
+
+  try {
     if (!proc || typeof proc !== 'object') return
 
     gui.username = proc.username || 'akiba'
@@ -770,16 +842,20 @@ function jsonToGui(json: string) {
     gui.llm.maxRetries = llm.maxRetries || 3
     gui.llm.debugLogging = llm.debugLogging || false
 
-    gui.tasks = (proc.tasks || []).map((t: any) => ({
-      mainClassName: t.mainClassName || '',
-      timeout: t.timeout || 600,
-      consoleLogLevel: 'OFF',
-      fileLogLevel: (t.fileLogLevel || 'info').toUpperCase(),
-      tableName: t.tableName || '',
-      configKey: t.configKey || ''
-    }))
+    gui.tasks = (proc.tasks || []).map((t: any) => {
+      const moduleName = t.mainClassName?.split('.').pop() || ''
+      return {
+        mainClassName: t.mainClassName || '',
+        timeout: t.timeout && t.timeout > 0 ? t.timeout : null,
+        consoleLogLevel: 'OFF',
+        fileLogLevel: (t.fileLogLevel || 'info').toUpperCase(),
+        tableName: t.tableName || '',
+        configKey: t.configKey || '',
+        moduleConfig: moduleConfigs.get(moduleName) || ''
+      }
+    })
     if (gui.tasks.length === 0) {
-      gui.tasks.push({ mainClassName: '', timeout: 600, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '' })
+      gui.tasks.push({ mainClassName: '', timeout: null, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '', moduleConfig: '' })
     }
   } catch (_e: any) { /* ignore */ }
 }
@@ -800,7 +876,7 @@ function switchToJson() {
 
 // ---- Tasks management -------------------------------------------------------
 function addTask() {
-  gui.tasks.push({ mainClassName: '', timeout: 600, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '' })
+  gui.tasks.push({ mainClassName: '', timeout: null, consoleLogLevel: 'INFO', fileLogLevel: 'INFO', tableName: '', configKey: '', moduleConfig: '' })
 }
 
 function removeTask(idx: number) {
@@ -828,7 +904,7 @@ function newRuntimeConfig() {
   gui.llm.temperature = null; gui.llm.topP = null; gui.llm.maxTokens = null
   gui.llm.timeoutSeconds = 120; gui.llm.maxRetries = 3; gui.llm.debugLogging = false
   gui.tasks = [
-    { mainClassName: 'org.iotsplab.akiba.module.AkibaUtils', timeout: 600, consoleLogLevel: 'OFF', fileLogLevel: 'INFO', tableName: '', configKey: '' }
+    { mainClassName: 'org.iotsplab.akiba.module.AkibaUtils', timeout: null, consoleLogLevel: 'OFF', fileLogLevel: 'INFO', tableName: '', configKey: '', moduleConfig: '' }
   ]
   runtimeConfigJson.value = guiToJson()
   configError.value = ''
@@ -980,6 +1056,32 @@ async function deleteRuntimeConfig() {
 }
 .key-input {
   flex: 1;
+}
+
+.model-checkbox-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 6px 0;
+  background: #fafafa;
+}
+.model-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.model-checkbox-item:hover {
+  background: #f0f0f0;
+}
+.model-checkbox-item input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .model-row {
@@ -1247,5 +1349,44 @@ async function deleteRuntimeConfig() {
   outline: none;
   border-color: #e94560;
   box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.15);
+}
+
+/* Task module config editor */
+.task-module-config {
+  margin-top: 10px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.task-module-config summary {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  background: #f5f5f5;
+  cursor: pointer;
+  user-select: none;
+}
+.task-module-config summary:hover { background: #f0f0f0; }
+.task-module-config .badge {
+  font-size: 10px;
+  background: #e94560;
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 6px;
+  margin-left: 6px;
+}
+.module-json-editor {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  box-sizing: border-box;
 }
 </style>

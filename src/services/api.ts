@@ -15,7 +15,7 @@ import type {
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 600000, // 10 min — file imports with many files can take long
   headers: {
     'Content-Type': 'application/json'
   }
@@ -121,7 +121,9 @@ export const agentApi = {
       systemPrompt
     }),
   deleteSession: (sessionId: string) =>
-    api.delete<{ message: string }>(`/agent/sessions/${sessionId}`)
+    api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
+  exportSession: (sessionId: string) =>
+    api.get(`/agent/sessions/${sessionId}/export`, { responseType: 'blob' })
 }
 
 export const workflowApi = {
@@ -158,7 +160,8 @@ export interface FileListResponse {
 export const fileApi = {
   import: (formData: FormData) =>
     api.post<{ message: string; fileIds: number[] }>('/files/import', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0
     }),
   list: (offset = 0, limit = 20) =>
     api.get<FileListResponse>('/files', { params: { offset, limit } }),
@@ -199,6 +202,7 @@ export interface LLMProviderInfo {
 }
 
 export interface StoredKeyEntry {
+  id: string
   provider: string
   modelNames: string[]
   baseUrl: string | null
@@ -206,7 +210,7 @@ export interface StoredKeyEntry {
 
 export interface LLMConfigPayload {
   provider: string
-  modelName: string
+  modelNames: string[]
   apiKey: string
   baseUrl?: string
 }

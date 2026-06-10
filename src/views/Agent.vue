@@ -15,6 +15,7 @@
           :key="s.sessionId"
           :class="{ active: s.sessionId === activeSessionId }"
           @click="selectSession(s.sessionId)"
+          @contextmenu.prevent="openContextMenu($event, s.sessionId, s.sessionName || '')"
         >
           <div class="title">{{ s.sessionName || 'Untitled' }}</div>
           <div class="sub">
@@ -28,6 +29,16 @@
           >×</button>
         </li>
       </ul>
+
+      <!-- Right-click context menu -->
+      <div
+        v-if="ctxMenu.show"
+        class="ctx-menu"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+        @click.self="ctxMenu.show = false"
+      >
+        <div class="ctx-menu-item" @click="exportSession(ctxMenu.sessionId)">📥 Export</div>
+      </div>
     </aside>
 
     <main class="chat">
@@ -45,8 +56,14 @@
             :key="m.messageId"
             :class="['msg', m.role]"
           >
-            <div class="role">{{ m.role === 'assistant' ? 'Akiba' : 'You' }}</div>
-            <div class="content">{{ m.content }}</div>
+            <div class="role">{{ roleLabel(m) }}</div>
+            <div v-if="m.role === 'tool'" class="tool-call">
+              <details>
+                <summary>{{ toolSummary(m) }}</summary>
+                <pre class="tool-result">{{ toolResult(m) }}</pre>
+              </details>
+            </div>
+            <div v-else class="content">{{ m.content }}</div>
           </div>
           <div v-if="sending" class="msg assistant pending">
             <div class="role">Akiba</div>
@@ -54,20 +71,49 @@
           </div>
         </div>
 
+        <div v-if="tokenUsage" class="token-bar">
+          <span class="token-label">Token usage</span>
+          <span class="token-value">I:{{ tokenUsage.input.toLocaleString() }}</span>
+          <span class="token-value">O:{{ tokenUsage.output.toLocaleString() }}</span>
+        </div>
+
         <div v-if="errorMsg" class="error-banner">{{ errorMsg }}</div>
 
-        <form class="composer" @submit.prevent="sendMessage">
-          <textarea
-            v-model="input"
-            placeholder="Type your message and press Ctrl/⌘ + Enter to send…"
-            rows="3"
-            @keydown="onComposerKeydown"
-            :disabled="sending"
-          ></textarea>
-          <button class="btn-primary" type="submit" :disabled="sending || !input.trim()">
-            {{ sending ? 'Sending…' : 'Send' }}
-          </button>
-        </form>
+        <!-- LLM config selector + composer -->
+        <div class="composer-area">
+          <!-- LLM config selector -->
+          <div v-if="llmConfigs.length > 0" class="llm-selector">
+            <div class="llm-selector-row">
+              <select v-model="selectedLlmConfig" class="llm-select" @change="onLlmConfigChange">
+                <option value="" disabled>— Select API Key —</option>
+                <option v-for="c in llmConfigs" :key="c.id" :value="c.id">
+                  {{ c.provider }} / {{ c.modelNames.length }} models{{ c.baseUrl ? ` (${c.baseUrl})` : '' }}
+                </option>
+              </select>
+              <select v-model="selectedLlmModel" class="llm-select" :disabled="!availableModels.length">
+                <option value="" disabled>— Select model —</option>
+                <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+          </div>
+          <div v-else class="llm-selector llm-empty">
+            <span>No LLM configuration found. </span>
+            <a href="#/settings" class="llm-link">Create one in Settings</a>
+          </div>
+
+          <form class="composer" @submit.prevent="sendMessage">
+            <textarea
+              v-model="input"
+              placeholder="Type your message and press Ctrl/⌘ + Enter to send…"
+              rows="3"
+              @keydown="onComposerKeydown"
+              :disabled="sending"
+            ></textarea>
+            <button class="btn-primary" type="submit" :disabled="sending || !input.trim()">
+              {{ sending ? 'Sending…' : 'Send' }}
+            </button>
+          </form>
+        </div>
       </template>
     </main>
 
@@ -76,6 +122,12 @@
       <div class="modal-content wide">
         <h2>New Agent Session</h2>
         <p class="subtitle">Select a binary file to analyze, or skip to start an empty session.</p>
+
+        <div v-if="llmConfigs.length === 0" class="no-llm-warning">
+          <strong>No LLM configuration found.</strong>
+          You need to create an LLM configuration in
+          <a href="#/settings" class="llm-link">Settings</a> before the agent can respond.
+        </div>
 
         <div class="form-group">
           <label>Search files</label>
@@ -115,7 +167,7 @@
 
         <div class="modal-actions">
           <button @click="showNewModal = false" class="btn-secondary">Cancel</button>
-          <button @click="createSession" class="btn-primary" :disabled="creatingSession">
+          <button @click="createSession" class="btn-primary" :disabled="creatingSession || llmConfigs.length === 0">
             {{ creatingSession ? 'Creating…' : selectedFile ? `Analyze "${selectedFile.name}"` : 'Start Empty' }}
           </button>
         </div>
@@ -125,10 +177,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
-import { agentApi, fileApi } from '@/services/api'
+import { ref, reactive, onMounted, nextTick } from 'vue'
+import { agentApi, fileApi, llmConfigApi } from '@/services/api'
 import type { AgentSession, AgentMessage } from '@/types'
-import type { FileSearchResult } from '@/services/api'
+import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
@@ -140,23 +192,87 @@ const creatingSession = ref(false)
 const sending = ref(false)
 const errorMsg = ref('')
 const input = ref('')
+const tokenUsage = ref<{ input: number; output: number } | null>(null)
 
 const messagesEl = ref<HTMLElement | null>(null)
 
-// ---- New session modal -----------------------------------------------------
+// ---- Context menu ----------------------------------------------------------
+const ctxMenu = reactive({ show: false, x: 0, y: 0, sessionId: '' })
+
+function openContextMenu(e: MouseEvent, sessionId: string, _name: string) {
+  ctxMenu.show = true
+  ctxMenu.x = e.clientX
+  ctxMenu.y = e.clientY
+  ctxMenu.sessionId = sessionId
+}
+
+// Close context menu on any click outside
+document.addEventListener('click', () => {
+  if (ctxMenu.show) ctxMenu.show = false
+})
+
+async function exportSession(sessionId: string) {
+  ctxMenu.show = false
+  try {
+    const resp = await agentApi.exportSession(sessionId)
+    const url = URL.createObjectURL(new Blob([resp.data], { type: 'text/markdown' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `session_${sessionId.slice(0, 8)}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (_e: any) {
+    errorMsg.value = 'Failed to export session.'
+  }
+}
+
+// ---- LLM config ------------------------------------------------------------
+const llmConfigs = ref<StoredKeyEntry[]>([])
+const selectedLlmConfig = ref('')
+const selectedLlmModel = ref('')
+const availableModels = ref<string[]>([])
+
+onMounted(async () => {
+  await Promise.all([loadSessions(), loadLlmConfigs()])
+  if (sessions.value.length > 0 && llmConfigs.value.length > 0) {
+    selectedLlmConfig.value = llmConfigs.value[0].id
+    onLlmConfigChange()
+    await selectSession(sessions.value[0].sessionId)
+  }
+})
+
+async function loadLlmConfigs() {
+  try {
+    const { data } = await llmConfigApi.keys()
+    llmConfigs.value = data.keys || []
+    if (llmConfigs.value.length > 0 && !selectedLlmConfig.value) {
+      selectedLlmConfig.value = llmConfigs.value[0].id
+      onLlmConfigChange()
+    }
+  } catch (_e: any) {
+    llmConfigs.value = []
+  }
+}
+
+function onLlmConfigChange() {
+  availableModels.value = []
+  selectedLlmModel.value = ''
+  const config = llmConfigs.value.find(c => c.id === selectedLlmConfig.value)
+  if (config && config.modelNames.length > 0) {
+    availableModels.value = config.modelNames
+    selectedLlmModel.value = config.modelNames[0]
+  }
+}
+
+// ---- Sessions ---------------------------------------------------------------
 const showNewModal = ref(false)
 const fileSearchQuery = ref('')
 const searchResults = ref<FileSearchResult[]>([])
 const searching = ref(false)
 const searchError = ref('')
 const selectedFile = ref<FileSearchResult | null>(null)
-
-onMounted(async () => {
-  await loadSessions()
-  if (sessions.value.length > 0) {
-    await selectSession(sessions.value[0].sessionId)
-  }
-})
 
 async function loadSessions() {
   loadingSessions.value = true
@@ -194,10 +310,13 @@ async function searchFiles() {
 }
 
 async function createSession() {
+  if (llmConfigs.value.length === 0) return
   creatingSession.value = true
   errorMsg.value = ''
   try {
-    const payload: any = {}
+    const payload: any = {
+      modelName: selectedLlmModel.value || undefined
+    }
     if (selectedFile.value) {
       payload.binaryId = selectedFile.value.id
       payload.sessionName = `Analysis of ${selectedFile.value.name}`
@@ -205,6 +324,7 @@ async function createSession() {
     const { data } = await agentApi.createSession(payload)
     sessions.value.unshift(data)
     showNewModal.value = false
+    tokenUsage.value = null
     await selectSession(data.sessionId)
   } catch (e: any) {
     errorMsg.value = e?.response?.data?.error || e?.message || 'Failed to create session.'
@@ -217,6 +337,7 @@ async function selectSession(id: string) {
   activeSessionId.value = id
   errorMsg.value = ''
   messages.value = []
+  tokenUsage.value = null
   loadingMessages.value = true
   try {
     const { data } = await agentApi.getMessages(id)
@@ -237,6 +358,7 @@ async function deleteSession(id: string) {
     if (activeSessionId.value === id) {
       activeSessionId.value = null
       messages.value = []
+      tokenUsage.value = null
     }
   } catch (e) {
     console.error('Failed to delete session:', e)
@@ -262,13 +384,12 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
-    const { data } = await agentApi.chat(activeSessionId.value, content)
-    // Replace temp user msg with the canonical one, append assistant msg.
-    messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
-    messages.value.push(data.userMessage, data.assistantMessage)
+    await agentApi.chat(activeSessionId.value, content)
+    // Reload all messages from server to capture tool calls too
+    const { data: msgData } = await agentApi.getMessages(activeSessionId.value)
+    messages.value = msgData.messages || []
     await scrollToBottom()
   } catch (e: any) {
-    // Roll back the optimistic user message.
     messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
     errorMsg.value = e?.response?.data?.error || e?.message || 'Chat failed.'
     input.value = content
@@ -294,6 +415,53 @@ function formatDate(date: string | null | undefined) {
   if (!date) return ''
   const d = new Date(date)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
+
+function roleLabel(m: AgentMessage): string {
+  if (m.role === 'assistant') return 'Akiba'
+  if (m.role === 'user') return 'You'
+  if (m.role === 'tool') return 'Tool'
+  return m.role
+}
+
+function toolSummary(m: AgentMessage): string {
+  const name = `🛠 ${m.toolName || 'tool'}`
+  // Extract args from: "**Observation (tool, args=JSON)**"
+  const text = m.toolResult || m.content || ''
+  const argsIdx = text.indexOf('args=')
+  if (argsIdx >= 0) {
+    const jsonStart = text.indexOf('{', argsIdx)
+    if (jsonStart >= 0) {
+      // Find matching closing brace by counting depth
+      let depth = 0
+      for (let i = jsonStart; i < text.length; i++) {
+        if (text[i] === '{') depth++
+        else if (text[i] === '}') { depth--; if (depth === 0) {
+          try {
+            const args = JSON.parse(text.slice(jsonStart, i + 1))
+            const short = JSON.stringify(args).slice(0, 60)
+            return `${name} ${short}${short.length >= 60 ? '…' : ''}`
+          } catch { break }
+        }}
+      }
+    }
+  }
+  return name
+}
+
+function toolResult(m: AgentMessage): string {
+  let text = m.toolResult || m.content || ''
+  // Strip the "**Observation (anything)**: " prefix (handles nested parens in args)
+  const obsEnd = text.indexOf(':** ')
+  if (obsEnd >= 0) text = text.slice(obsEnd + 4)
+  // If the result is JSON, pretty-print it
+  const trimmed = text.trim()
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch { /* not valid JSON, fall through */ }
+  }
+  return text
 }
 </script>
 
@@ -468,12 +636,71 @@ function formatDate(date: string | null | undefined) {
   color: #888;
 }
 
+.msg.tool {
+  align-self: center;
+  max-width: 90%;
+}
+.tool-call {
+  background: #f5f5f7;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 0;
+  font-size: 12px;
+  width: 100%;
+}
+.tool-call details { padding: 0; }
+.tool-call summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #555;
+  font-weight: 500;
+  user-select: none;
+}
+.tool-call summary:hover { background: #f0f0f0; border-radius: 8px; }
+.tool-result {
+  margin: 0;
+  padding: 8px 12px 10px;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-top: 1px solid #e8e8e8;
+  border-radius: 0 0 8px 8px;
+}
+
 .dot-flash {
   animation: pulse 1.2s infinite;
 }
 @keyframes pulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
+}
+
+/* Token bar */
+.token-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: #f8f9fa;
+  border-top: 1px solid #eee;
+  font-size: 12px;
+  color: #666;
+}
+.token-label {
+  font-weight: 500;
+  color: #888;
+}
+.token-value {
+  background: #eef2f7;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 11px;
 }
 
 .error-banner {
@@ -484,11 +711,45 @@ function formatDate(date: string | null | undefined) {
   border-top: 1px solid #ffcdd2;
 }
 
+/* LLM selector + composer */
+.composer-area {
+  border-top: 1px solid #eee;
+}
+
+.llm-selector {
+  padding: 8px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #eee;
+}
+.llm-selector-row {
+  display: flex;
+  gap: 8px;
+}
+.llm-selector-row .llm-select { flex: 1; }
+
+.llm-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+.llm-empty {
+  font-size: 13px;
+  color: #888;
+}
+.llm-link {
+  color: #e94560;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .composer {
   display: flex;
   gap: 10px;
   padding: 14px 16px;
-  border-top: 1px solid #eee;
   background: #fafafa;
 }
 
@@ -510,6 +771,26 @@ function formatDate(date: string | null | undefined) {
   padding: 14px;
 }
 .muted.small { font-size: 13px; }
+
+/* ---- Context Menu --------------------------------------------------------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 200;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  min-width: 120px;
+}
+.ctx-menu-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.ctx-menu-item:hover { background: #fff5f7; color: #e94560; }
 
 /* ---- New Session Modal ---------------------------------------------------- */
 .modal {
@@ -533,6 +814,16 @@ function formatDate(date: string | null | undefined) {
 .modal-content.wide { width: 650px; }
 .modal-content h2 { margin-bottom: 6px; font-size: 20px; }
 .subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
+
+.no-llm-warning {
+  background: #fff3cd;
+  border: 1px solid #ffeeba;
+  color: #856404;
+  padding: 12px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
 
 .form-group { margin-bottom: 16px; }
 .form-group label {
