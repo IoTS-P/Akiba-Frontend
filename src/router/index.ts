@@ -58,6 +58,11 @@ const router = createRouter({
           component: () => import('@/views/Query.vue')
         },
         {
+          path: 'skills',
+          name: 'skills',
+          component: () => import('@/views/Skills.vue')
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/Settings.vue')

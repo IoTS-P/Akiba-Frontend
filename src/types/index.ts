@@ -17,6 +17,7 @@ export interface Script {
   id: number
   name: string
   description?: string | null
+  author?: string | null
   code: string
   codeSize?: number | null
   language?: string | null
@@ -73,6 +74,8 @@ export interface AgentSession {
   sessionName: string | null
   status: string
   modelName: string | null
+  projectName?: string | null
+  moduleName?: string | null
   createdAt: string | null
   updatedAt: string | null
 }

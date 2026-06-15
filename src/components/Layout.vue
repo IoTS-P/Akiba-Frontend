@@ -31,6 +31,10 @@
           <span class="icon">🔍</span>
           <span>Query</span>
         </router-link>
+        <router-link to="/skills" class="nav-item">
+          <span class="icon">🧩</span>
+          <span>Skills</span>
+        </router-link>
         <router-link to="/settings" class="nav-item">
           <span class="icon">⚙️</span>
           <span>Settings</span>
@@ -81,6 +85,7 @@ const currentRoute = computed(() => {
     workflows: 'Workflows',
     files: 'Files',
     query: 'Query',
+    skills: 'Skills',
     settings: 'Settings'
   }
   return names[route.name as string] || 'Akiba'

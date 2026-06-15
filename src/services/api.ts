@@ -75,8 +75,8 @@ export const instanceApi = {
 }
 
 export const scriptApi = {
-  list: (limit = 100, offset = 0) =>
-    api.get<{ scripts: Script[] }>('/scripts', { params: { limit, offset } }),
+  list: (limit = 100, offset = 0, query?: string) =>
+    api.get<{ scripts: Script[] }>('/scripts', { params: { limit, offset, query } }),
   get: (id: number) => api.get<Script>(`/scripts/${id}`),
   create: (payload: {
     name: string
@@ -111,10 +111,10 @@ export const agentApi = {
     api.get<{ sessions: AgentSession[] }>('/agent/sessions', {
       params: { limit, offset }
     }),
-  createSession: (payload: { sessionName?: string; systemPrompt?: string; modelName?: string } = {}) =>
+  createSession: (payload: { sessionName?: string; systemPrompt?: string; modelName?: string; binaryId?: number; projectName?: string; projectMode?: 'new' | 'existing' } = {}) =>
     api.post<AgentSession>('/agent/sessions', payload),
   getMessages: (sessionId: string) =>
-    api.get<{ messages: AgentMessage[] }>(`/agent/sessions/${sessionId}/messages`),
+    api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number }>(`/agent/sessions/${sessionId}/messages`),
   chat: (sessionId: string, content: string, systemPrompt?: string) =>
     api.post<ChatTurnResponse>(`/agent/sessions/${sessionId}/chat`, {
       content,
@@ -127,6 +127,7 @@ export const agentApi = {
 }
 
 export const workflowApi = {
+  projects: () => api.get<{ projects: string[] }>('/workflow/projects'),
   start: (instanceName: string, configPath?: string, threads?: number) =>
     api.post<{ workflowId: string; message: string }>('/workflow/start', {
       instanceName,
@@ -181,6 +182,44 @@ export interface FileSearchResult {
   format?: string | null
   compilerSpec?: string | null
   checksum?: string | null
+}
+
+export interface SkillFileInfo {
+  path: string
+  size: number
+  description?: string | null
+}
+
+export interface SkillInfo {
+  id: string
+  name: string
+  version?: string | null
+  description: string
+  entry: string
+  tags: string[]
+  triggers: string[]
+  files: SkillFileInfo[]
+  path?: string | null
+}
+
+export interface SkillReadResult {
+  skill: SkillInfo
+  content: string
+  truncated: boolean
+  path?: string | null
+}
+
+export const skillApi = {
+  list: () => api.get<{ skills: SkillInfo[] }>('/skills'),
+  upload: (formData: FormData) =>
+    api.post<{ message: string; skill: SkillInfo }>('/skills/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  read: (skillId: string, maxChars = 20000) =>
+    api.get<SkillReadResult>(`/skills/${encodeURIComponent(skillId)}`, { params: { maxChars } }),
+  readFile: (skillId: string, path: string, maxChars = 20000) =>
+    api.get<SkillReadResult>(`/skills/${encodeURIComponent(skillId)}/file`, { params: { path, maxChars } }),
+  delete: (skillId: string) => api.delete<{ message: string }>(`/skills/${encodeURIComponent(skillId)}`)
 }
 
 export const queryApi = {

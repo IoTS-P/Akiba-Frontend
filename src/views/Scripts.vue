@@ -2,6 +2,17 @@
   <div class="scripts">
     <div class="actions">
       <button @click="openCreateModal" class="btn-primary">New Script</button>
+      <div class="search-bar">
+        <input
+          v-model="searchQuery"
+          placeholder="Search by name, description or author…"
+          @keyup.enter="doSearch"
+        />
+        <button @click="doSearch" class="btn-secondary" :disabled="searching">
+          {{ searching ? '⋯' : 'Search' }}
+        </button>
+      </div>
+      <button @click="clearSearch" v-if="searchQuery" class="btn-secondary">Clear</button>
       <button @click="loadScripts" class="btn-secondary">Refresh</button>
     </div>
     <div v-if="loading" class="loading">Loading...</div>
@@ -20,7 +31,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="script in sortedScripts" :key="script.id">
+            <tr v-for="script in filteredScripts" :key="script.id">
               <td>{{ script.id }}</td>
               <td>
                 <div class="name-cell">
@@ -55,7 +66,7 @@
           &laquo; Prev
         </button>
         <span class="page-info">
-          Page {{ currentPage }} / {{ totalPages }} ({{ scripts.length }} scripts)
+          Page {{ currentPage }} / {{ totalPages }} ({{ filteredScripts.length }} scripts matching)
         </span>
         <button
           class="btn-secondary small"
@@ -156,8 +167,6 @@
         </div>
         <div class="section-label">Code</div>
         <pre class="code-block">{{ selectedScript?.code }}</pre>
-        <div class="section-label">Latest Output</div>
-        <pre class="code-block output">{{ selectedScript?.output || 'No output' }}</pre>
 
         <div class="section-label">Executions</div>
         <div v-if="executionsLoading" class="loading small">Loading executions…</div>
@@ -173,7 +182,12 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="ex in executions" :key="ex.id">
+            <tr
+              v-for="ex in executions"
+              :key="ex.id"
+              :class="{ 'selected-exec': selectedExecution?.id === ex.id }"
+              @click="viewExecution(ex)"
+            >
               <td>{{ ex.id }}</td>
               <td>{{ ex.binaryId ?? '—' }}</td>
               <td><span :class="['status', ex.status || 'unknown']">{{ ex.status || 'unknown' }}</span></td>
@@ -182,6 +196,17 @@
             </tr>
           </tbody>
         </table>
+
+        <!-- Selected execution detail -->
+        <div v-if="selectedExecution" class="exec-detail">
+          <div class="section-label">
+            Execution #{{ selectedExecution.id }} Output
+            <span :class="['status', selectedExecution.status || 'unknown']" class="ml8">{{ selectedExecution.status }}</span>
+          </div>
+          <div v-if="execDetailLoading" class="loading small">Loading execution detail…</div>
+          <pre v-else class="code-block output">{{ execDetail || selectedExecution.output || 'No output captured' }}</pre>
+          <div v-if="selectedExecution.errorMessage" class="error">{{ selectedExecution.errorMessage }}</div>
+        </div>
 
         <div class="modal-actions">
           <button @click="showViewModal = false" class="btn-secondary">Close</button>
@@ -195,12 +220,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { scriptApi } from '@/services/api'
 import type { Script, ScriptExecution } from '@/types'
+import { fixLiteralNewlines } from '@/utils/format'
 
 const PAGE_SIZE = 20
 
 const scripts = ref<Script[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
+const searchQuery = ref('')
+const searching = ref(false)
 
 const showCreateModal = ref(false)
 const showRunModal = ref(false)
@@ -209,6 +237,9 @@ const showViewModal = ref(false)
 const selectedScript = ref<Script | null>(null)
 const executions = ref<ScriptExecution[]>([])
 const executionsLoading = ref(false)
+const selectedExecution = ref<ScriptExecution | null>(null)
+const execDetail = ref<string | null>(null)
+const execDetailLoading = ref(false)
 
 const creating = ref(false)
 const running = ref(false)
@@ -232,19 +263,33 @@ const runForm = ref({
 const parsedParams = ref<Array<{ name: string; description: string }>>([])
 const paramValues = ref<Record<string, string>>({})
 
-// Sort scripts by ID ascending
-const sortedScripts = computed(() => {
-  return [...scripts.value].sort((a, b) => a.id - b.id)
+// Search-local filter (case-insensitive on name, description, author)
+const filteredScripts = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return pageScripts.value
+  return pageScripts.value.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    (s.description ?? '').toLowerCase().includes(q) ||
+    (s.author ?? '').toLowerCase().includes(q)
+  )
+})
+
+// Scripts on the current page
+const pageScripts = computed(() => {
+  const sorted = [...scripts.value].sort((a, b) => a.id - b.id)
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return sorted.slice(start, start + PAGE_SIZE)
 })
 
 const totalPages = computed(() => {
-  return Math.max(1, Math.ceil(sortedScripts.value.length / PAGE_SIZE))
+  return Math.max(1, Math.ceil(scripts.value.length / PAGE_SIZE))
 })
 
 onMounted(loadScripts)
 
 async function loadScripts() {
   loading.value = true
+  currentPage.value = 1
   try {
     const { data } = await scriptApi.list(10000, 0) // Load all for client-side pagination
     scripts.value = data.scripts || []
@@ -253,6 +298,24 @@ async function loadScripts() {
   } finally {
     loading.value = false
   }
+}
+
+async function doSearch() {
+  searching.value = true
+  currentPage.value = 1
+  try {
+    const { data } = await scriptApi.list(10000, 0, searchQuery.value.trim() || undefined)
+    scripts.value = data.scripts || []
+  } catch (e) {
+    console.error('Search failed:', e)
+  } finally {
+    searching.value = false
+  }
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  loadScripts()
 }
 
 function openCreateModal() {
@@ -378,6 +441,22 @@ async function viewScript(script: Script) {
     console.error('Failed to load executions:', e)
   } finally {
     executionsLoading.value = false
+  }
+  selectedExecution.value = null
+  execDetail.value = null
+}
+
+async function viewExecution(ex: ScriptExecution) {
+  selectedExecution.value = ex
+  execDetail.value = null
+  execDetailLoading.value = true
+  try {
+    const { data } = await scriptApi.getExecution(ex.id)
+    execDetail.value = fixLiteralNewlines(data.output || data.errorMessage || '(empty output)')
+  } catch (e) {
+    execDetail.value = 'Failed to load execution detail.'
+  } finally {
+    execDetailLoading.value = false
   }
 }
 
@@ -627,5 +706,42 @@ function formatDate(date: string | null | undefined) {
   font-size: 13px;
   margin-top: 4px;
   margin-bottom: 8px;
+}
+
+/* ---- Search bar ---- */
+.search-bar {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  max-width: 500px;
+}
+.search-bar input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+/* ---- Execution detail ---- */
+.exec-detail {
+  margin-top: 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #fafafa;
+}
+.ml8 { margin-left: 8px; }
+.selected-exec {
+  background: #f0f7ff !important;
+  cursor: pointer;
+}
+.table.sub tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.table.sub tbody tr:hover {
+  background: #f5f5f5;
 }
 </style>

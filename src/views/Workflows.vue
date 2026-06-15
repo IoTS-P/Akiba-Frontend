@@ -101,8 +101,30 @@
 
         <!-- File detail -->
         <div v-if="selectedFileId != null" class="detail-section">
-          <div class="section-title">File #{{ selectedFileId }}</div>
-          <div v-if="fileModuleLogs.length === 0" class="muted">No module data for this file yet.</div>
+          <div class="section-title">File #{{ selectedFileId }}
+            <span :class="['file-status', selectedFileStatus]">{{ selectedFileStatus }}</span>
+          </div>
+
+          <!-- Agent LLM detection banner -->
+          <div v-if="agentSessionId" class="agent-banner">
+            <span class="agent-banner-text">
+              🤖 LLM agent analysis
+              <span v-if="agentSessionRunning" class="agent-badge running">live</span>
+            </span>
+            <button class="btn-agent-jump" @click="jumpToAgent(agentSessionId)">View in Agent &rarr;</button>
+          </div>
+
+          <!-- Module logs (multiple modules) -->
+          <div v-if="fileModuleLogs.length > 0" class="multi-modules">
+            <div v-for="(ml, i) in fileModuleLogs" :key="i" class="module-entry">
+              <div class="module-header">
+                <span :class="['module-status', ml.status]">{{ ml.status }}</span>
+                <span class="module-name">{{ ml.name }}</span>
+              </div>
+              <pre class="module-log">{{ ml.log }}</pre>
+            </div>
+          </div>
+          <div v-else-if="!agentSessionId && !detailFileRunning" class="muted">No module data for this file yet.</div>
           <div v-else v-for="(ml, i) in fileModuleLogs" :key="i" class="module-entry">
             <div class="module-header">
               <span :class="['module-status', ml.status]">{{ ml.status }}</span>
@@ -155,6 +177,12 @@ const selectedFileId = ref<number | null>(null)
 const fileModuleLogs = ref<Array<{ name: string; status: string; log: string }>>([])
 const detailFileRunning = ref(false)
 const detailFileLogs = ref<string[]>([])
+const selectedFileStatus = ref('')
+
+// Agent LLM session detection
+const agentSessionId = ref<string | null>(null)
+const agentSessionRunning = ref(false)
+let agentDetectTimer: number | null = null
 
 const detailTotalPages = computed(() => Math.max(1, Math.ceil(detailFiles.value.length / PAGE_SIZE)))
 const pagedFiles = computed(() => {
@@ -233,14 +261,27 @@ async function openLogViewer(id: string, initialStatus: string) {
   const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
   const baseUrl = `${protocol}//${window.location.host}/api`
   const es = new EventSource(`${baseUrl}/workflow/stream/${id}`)
+  let logUserScrolledAway = false
   es.onmessage = (event) => {
     const line = event.data
     if (line === '[DONE]') { es.close(); return }
     if (line.startsWith('[STATUS] ')) { logStatus.value = line.slice(9) as any; return }
     logLines.value.push(line)
-    nextTick(() => { const el = logContainerRef.value; if (el) el.scrollTop = el.scrollHeight })
+    nextTick(() => {
+      const el = logContainerRef.value
+      if (!el || logUserScrolledAway) return
+      el.scrollTop = el.scrollHeight
+    })
   }
   es.onerror = () => { es.close() }
+  // Log scroll listener to respect user scroll position
+  setTimeout(() => {
+    const el = logContainerRef.value
+    if (el) el.addEventListener('scroll', () => {
+      if (!el) return
+      logUserScrolledAway = el.scrollHeight - el.scrollTop - el.clientHeight > 100
+    }, { passive: true })
+  }, 100)
 }
 
 // ---- Detail panel (SSE) ----------------------------------------------------
@@ -266,6 +307,7 @@ function parseFileProgress(line: string, files: Array<{ id: number; status: stri
 async function openDetail(id: string, initialStatus: string) {
   // Close previous SSE if any
   if (detailEventSource) { detailEventSource.close(); detailEventSource = null }
+  clearAgentDetection()
 
   showDetail.value = true
   detailWorkflowId.value = id
@@ -318,14 +360,61 @@ async function openDetail(id: string, initialStatus: string) {
   detailEventSource.onerror = () => { if (detailEventSource) { detailEventSource.close(); detailEventSource = null } }
 }
 
+function clearAgentDetection() {
+  if (agentDetectTimer) { clearInterval(agentDetectTimer); agentDetectTimer = null }
+  agentSessionId.value = null
+  agentSessionRunning.value = false
+}
+
+async function detectAgentSession(fid: number) {
+  try {
+    // Must include the daemon instance header (same as axios interceptor does)
+    const instance = localStorage.getItem('akibaSelectedInstance') || ''
+    const resp = await fetch(
+      `${window.location.protocol}//${window.location.host}/api/agent/sessions?limit=20&binaryId=${fid}`,
+      { headers: instance ? { 'X-Akiba-Instance': instance } : {} }
+    )
+    if (!resp.ok) return
+    const data = await resp.json()
+    const sessions: Array<{ sessionId: string; status: string; moduleName?: string | null }> = data.sessions || []
+    // Find the most recent non-chat session (i.e. an automated workflow AgentModule session)
+    const agent = sessions.find(s =>
+      s.sessionId &&
+      s.status !== 'cancelled' &&
+      !!s.moduleName &&
+      s.moduleName !== 'chat'
+    )
+    if (agent) {
+      agentSessionId.value = agent.sessionId
+      agentSessionRunning.value = agent.status === 'running' || agent.status === 'active'
+    } else {
+      agentSessionId.value = null
+      agentSessionRunning.value = false
+    }
+  } catch (_e: any) { /* ignore */ }
+}
+
+function jumpToAgent(sessionId: string) {
+  // Navigate to the Agent view with this session pre-selected (hash-mode routing)
+  window.location.hash = `#/agent?sessionId=${sessionId}`
+}
+
 function selectFile(fid: number) {
   selectedFileId.value = fid
   fileModuleLogs.value = []
   detailFileLogs.value = []
+  clearAgentDetection()
 
   // Check if this file is still running
   const f = detailFiles.value.find(f => f.id === fid)
   detailFileRunning.value = f?.status === 'running' || f?.status === 'pending'
+  selectedFileStatus.value = f?.status || 'unknown'
+
+  // Detect agent LLM session for this binary
+  detectAgentSession(fid)
+  if (detailFileRunning.value) {
+    agentDetectTimer = window.setInterval(() => detectAgentSession(fid), 3000)
+  }
 
   // Try to fetch module logs from log files
   const wfId = detailWorkflowId.value
@@ -373,6 +462,35 @@ function showMessage(msg: string, type: 'success' | 'error') {
 .status.failed { background: #ffebee; color: #d32f2f; }
 .status.cancelled { background: #fff3e0; color: #f57c00; }
 .btn-action { padding: 6px 12px; margin-right: 6px; border: 1px solid #ddd; background: #fff; border-radius: 4px; font-size: 13px; cursor: pointer; }
+
+/* File status badge in detail title */
+.file-status {
+  display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 8px;
+  font-weight: 600; margin-left: 8px; vertical-align: middle; text-transform: lowercase;
+}
+.file-status.running { background: #e3f2fd; color: #1976d2; }
+.file-status.completed { background: #e8f5e9; color: #388e3c; }
+.file-status.failed { background: #ffebee; color: #d32f2f; }
+.file-status.pending { background: #fff3e0; color: #f57c00; }
+.file-status.unknown { background: #f5f5f5; color: #999; }
+
+/* Agent detection banner */
+.agent-banner {
+  display: flex; align-items: center; gap: 12px;
+  background: #e3f2fd; border: 1px solid #90caf9;
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+}
+.agent-banner-text { font-size: 13px; color: #1565c0; font-weight: 500; flex: 1; }
+.agent-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 600;
+  text-transform: uppercase; margin-left: 6px;
+}
+.agent-badge.running { background: #c8e6c9; color: #2e7d32; }
+.btn-agent-jump {
+  padding: 6px 14px; background: #1565c0; color: #fff; border: none;
+  border-radius: 5px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.btn-agent-jump:hover { background: #0d47a1; }
 .btn-action.danger { color: #e94560; border-color: #e94560; }
 .btn-action.danger:hover { background: #e94560; color: #fff; }
 .message { margin-top: 16px; padding: 12px; border-radius: 6px; font-size: 14px; }
