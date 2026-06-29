@@ -380,13 +380,14 @@ async function detectAgentSession(fid: number) {
     // Find the most recent non-chat session (i.e. an automated workflow AgentModule session)
     const agent = sessions.find(s =>
       s.sessionId &&
-      s.status !== 'cancelled' &&
+      s.status !== 'closed' && s.status !== 'cancelled' &&
       !!s.moduleName &&
       s.moduleName !== 'chat'
     )
     if (agent) {
       agentSessionId.value = agent.sessionId
-      agentSessionRunning.value = agent.status === 'running' || agent.status === 'active'
+      agentSessionRunning.value = agent.status === 'running' || agent.status === 'standby' ||
+        agent.status === 'msghandle' || agent.status === 'cancelling' || agent.status === 'active'
     } else {
       agentSessionId.value = null
       agentSessionRunning.value = false

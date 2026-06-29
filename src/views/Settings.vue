@@ -190,12 +190,12 @@
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label>Logs Root <span class="hint">(default: ~/.akiba/logs)</span></label>
-                <input v-model="gui.general.logsRoot" :placeholder="gui.general.logsRoot || '~/.akiba/logs'" />
+                <label>Logs Root <span class="hint">(fixed per user)</span></label>
+                <input :value="computedLogsRoot" readonly class="readonly-input" tabindex="-1" />
               </div>
               <div class="form-group">
-                <label>Workspace Root <span class="hint">(default: ~/.akiba/workspace)</span></label>
-                <input v-model="gui.general.workspaceRoot" :placeholder="gui.general.workspaceRoot || '~/.akiba/workspace'" />
+                <label>Workspace Root <span class="hint">(fixed per user)</span></label>
+                <input :value="computedWorkspaceRoot" readonly class="readonly-input" tabindex="-1" />
               </div>
             </div>
           </details>
@@ -204,19 +204,52 @@
           <details class="config-section">
             <summary>Ghidra Project</summary>
             <div class="form-row">
-              <div class="form-group"><label>Project Root</label><input v-model="gui.ghidra.projectRoot" placeholder="ghidra_projects" /></div>
-              <div class="form-group"><label>Project Name</label><input v-model="gui.ghidra.name" placeholder="my_project" /></div>
+              <div class="form-group">
+                <label>Project Root <span class="hint">(fixed per user)</span></label>
+                <input :value="computedProjectRoot" readonly class="readonly-input" tabindex="-1" />
+              </div>
+              <div class="form-group">
+                <label>Project Name</label>
+                <select v-model="ghidraProjectSelection" @change="onGhidraProjectSelectionChange">
+                  <option value="__new__">+ New Project</option>
+                  <option v-for="p in ghidraProjectOptions" :key="p.name" :value="p.name">
+                    {{ p.name }}{{ p.fileCount ? ` (${p.fileCount} files)` : '' }}
+                  </option>
+                </select>
+              </div>
               <div class="form-group">
                 <label>Mode</label>
-                <select v-model="gui.ghidra.mode">
-                  <option value="new">new</option>
-                  <option value="fork">fork</option>
-                  <option value="base">base</option>
+                <select v-model="gui.ghidra.mode" :disabled="ghidraProjectSelection === '__new__'">
+                  <template v-if="ghidraProjectSelection === '__new__'">
+                    <option value="new">new</option>
+                  </template>
+                  <template v-else>
+                    <option value="base">base</option>
+                    <option value="fork">fork</option>
+                  </template>
                 </select>
               </div>
             </div>
-            <div class="form-row" v-if="gui.ghidra.mode === 'fork'">
-              <div class="form-group"><label>Fork To</label><input v-model="gui.ghidra.forkTo" placeholder="(optional)" /></div>
+            <!-- New project: editable name -->
+            <div v-if="ghidraProjectSelection === '__new__'" class="form-row">
+              <div class="form-group flex2">
+                <label>New Project Name <span class="hint">(default: {{ defaultNewProjectName }})</span></label>
+                <input v-model="gui.ghidra.name" :placeholder="defaultNewProjectName" />
+              </div>
+            </div>
+            <!-- Existing project (read-only display) -->
+            <div v-else class="form-row">
+              <div class="form-group flex2">
+                <label>Source Project <span class="hint">(using existing)</span></label>
+                <input :value="ghidraProjectSelection" readonly class="readonly-input" tabindex="-1" />
+              </div>
+            </div>
+            <!-- Fork target -->
+            <div v-if="ghidraProjectSelection !== '__new__' && gui.ghidra.mode === 'fork'" class="form-row">
+              <div class="form-group flex2">
+                <label>Fork To <span class="hint">(default: {{ defaultForkName }})</span></label>
+                <input v-model="gui.ghidra.forkTo" :placeholder="defaultForkName" />
+              </div>
               <div class="form-group inline-check"><label><input type="checkbox" v-model="gui.ghidra.forkOnTask" /> Fork on Task</label></div>
             </div>
             <div class="form-row">
@@ -323,7 +356,7 @@
                 <summary>Module Config <span v-if="task.moduleConfig.trim()" class="badge">JSON</span></summary>
                 <div class="form-group" style="margin-top:8px">
                   <label>Module-specific JSON configuration</label>
-                  <textarea v-model="task.moduleConfig" class="module-json-editor" rows="6" spellcheck="false" placeholder='e.g. {"option1": "value1", "option2": 42}'></textarea>
+                  <textarea v-model="task.moduleConfig" class="module-json-editor" rows="6" spellcheck="false" placeholder='e.g. {"option1": "value1", "option2": 42}' @keydown="handleTabKey"></textarea>
                 </div>
               </details>
             </div>
@@ -334,7 +367,7 @@
         <!-- JSON mode -->
         <div v-else class="form-group">
           <label>JSON Editor</label>
-          <textarea v-model="runtimeConfigJson" class="json-editor" rows="20" spellcheck="false" :disabled="savingConfig"></textarea>
+          <textarea v-model="runtimeConfigJson" class="json-editor" rows="20" spellcheck="false" :disabled="savingConfig" @keydown="handleTabKey"></textarea>
         </div>
 
         <div class="form-group">
@@ -363,9 +396,42 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
-import { llmConfigApi, runtimeConfigApi } from '@/services/api'
+import { reactive, ref, computed, onMounted, watch } from 'vue'
+import { llmConfigApi, runtimeConfigApi, projectApi } from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry } from '@/services/api'
+
+const authStore = useAuthStore()
+
+// Per-user identity used to derive fixed paths. We fall back to 'default'
+// if the auth store hasn't been hydrated yet (shouldn't happen in practice
+// because the route guards require auth, but the fallback keeps the UI
+// usable during the first render).
+const currentUsername = computed(() => authStore.user?.username || 'default')
+
+// Paths are computed — the user cannot override them. Each user gets an
+// isolated Ghidra project tree and Akiba state directory under their
+// `~/.akiba/<area>/<username>` location.
+const computedLogsRoot = computed(() => `~/.akiba/logs/${currentUsername.value}`)
+const computedWorkspaceRoot = computed(() => `~/.akiba/workspace/${currentUsername.value}`)
+const computedProjectRoot = computed(() => `ghidra_projects/${currentUsername.value}`)
+
+// Sentinel used in the Project Name dropdown to mark the "create a new
+// project" option. We can't use the empty string because that would be
+// ambiguous with "user cleared the field".
+const NEW_PROJECT_SENTINEL = '__new__'
+
+// Available Ghidra projects loaded from the backend. We only need the
+// name and the file count for the dropdown labels — fork default-name
+// generation depends on whether a candidate `<original>_forked_<N>`
+// already exists on disk.
+const ghidraProjectOptions = ref<{ name: string; fileCount: number }[]>([])
+
+/**
+ * Drive value of the Project Name dropdown. Either a sentinel
+ * (`__new__`) for "create new" or an existing project name.
+ */
+const ghidraProjectSelection = ref<string>(NEW_PROJECT_SENTINEL)
 
 const providers = ref<LLMProviderInfo[]>([])
 const keys = ref<StoredKeyEntry[]>([])
@@ -554,6 +620,95 @@ const computedBinariesRoot = computed(() => {
   return `~/.akiba/binaries/${user}/${inst}/`
 })
 
+// Compute a sensible default name for a brand-new project, based on the
+// runtime-config name (so related workflows end up grouped) plus a numeric
+// suffix to avoid collisions with anything already on disk.
+const defaultNewProjectName = computed(() => {
+  const confBase = (runtimeConfigName.value || 'project').replace(/[^A-Za-z0-9._-]/g, '_')
+  let n = 1
+  while (ghidraProjectOptions.value.some(p => p.name === `${confBase}_${n}`)) {
+    n++
+  }
+  return `${confBase}_${n}`
+})
+
+// Compute default fork target name: `<original>_forked_<N>` where N is the
+// smallest positive integer such that no project with that name already
+// exists on disk.
+const defaultForkName = computed(() => {
+  if (ghidraProjectSelection.value === NEW_PROJECT_SENTINEL) return ''
+  const original = ghidraProjectSelection.value
+  const prefix = `${original}_forked_`
+  let n = 1
+  while (ghidraProjectOptions.value.some(p => p.name === `${prefix}${n}`)) {
+    n++
+  }
+  return `${prefix}${n}`
+})
+
+/**
+ * Whenever the user changes the Project Name dropdown, reset dependent
+ * fields so the form stays internally consistent:
+ *   - switching to "+ New Project" → mode forced to `new`, name auto-filled
+ *     with the default new-project name. We always overwrite the name
+ *     here (even if the user previously typed something) so the field
+ *     never carries a stale "selected project" string into the new-project
+ *     context — that would be confusing UX.
+ *   - switching to an existing project → mode forced to `base` (a fork
+ *     default is filled in later, only when the user picks `fork`).
+ */
+function onGhidraProjectSelectionChange() {
+  if (ghidraProjectSelection.value === NEW_PROJECT_SENTINEL) {
+    gui.ghidra.mode = 'new'
+    gui.ghidra.name = defaultNewProjectName.value
+    gui.ghidra.forkTo = ''
+  } else {
+    // Treat the selection as the source project.
+    gui.ghidra.name = ghidraProjectSelection.value
+    // Default to `base` on first switch; the user can then opt into `fork`.
+    if (gui.ghidra.mode !== 'fork' && gui.ghidra.mode !== 'base') {
+      gui.ghidra.mode = 'base'
+    }
+    gui.ghidra.forkTo = ''
+  }
+}
+
+/**
+ * When the user toggles between `base` and `fork` on an existing project,
+ * pre-fill `forkTo` with the default `<original>_forked_<N>` name so they
+ * can simply press Save — but only if they haven't already typed a custom
+ * fork target.
+ */
+watch(
+  () => gui.ghidra.mode,
+  (newMode) => {
+    if (
+      newMode === 'fork' &&
+      ghidraProjectSelection.value !== NEW_PROJECT_SENTINEL &&
+      !gui.ghidra.forkTo.trim()
+    ) {
+      gui.ghidra.forkTo = defaultForkName.value
+    }
+  }
+)
+
+/**
+ * Fetch the list of existing Ghidra projects for the current user.
+ * Refreshed when the Settings view mounts; failures are non-fatal —
+ * the dropdown simply shows only the "+ New Project" option.
+ */
+async function loadGhidraProjects() {
+  try {
+    const { data } = await projectApi.list()
+    ghidraProjectOptions.value = (data.projects ?? []).map(p => ({
+      name: p.name,
+      fileCount: p.fileCount
+    }))
+  } catch (_e) {
+    ghidraProjectOptions.value = []
+  }
+}
+
 // Import from saved LLM configs (the keys from the LLM Configuration card above)
 const selectedSavedLlmIdx = ref(-1)
 const availableRuntimeModels = ref<string[]>([])
@@ -674,7 +829,7 @@ const gui = reactive({
 })
 
 onMounted(async () => {
-  await loadRuntimeConfigs()
+  await Promise.all([loadRuntimeConfigs(), loadGhidraProjects()])
 })
 
 async function loadRuntimeConfigs() {
@@ -700,16 +855,31 @@ function guiToJson(): string {
   general.processor = g.processor
   general.autoAnalysisTimeout = g.autoAnalysisTimeout
   general.threads = g.threads
-  if (g.logsRoot) general.logsRoot = g.logsRoot
-  if (g.workspaceRoot) general.workspaceRoot = g.workspaceRoot
+  // Logs Root and Workspace Root are fixed per-user paths. We always
+  // emit the computed value so a stale entry in the GUI state can't
+  // leak through to the saved JSON.
+  general.logsRoot = computedLogsRoot.value
+  general.workspaceRoot = computedWorkspaceRoot.value
   mainObj.general = general
   mainObj.globalConsoleLogLevel = 'OFF'
   mainObj.globalFileLogLevel = gui.globalFileLogLevel
 
   const gp = gui.ghidra
-  const gproj: any = { projectRoot: gp.projectRoot, mode: gp.mode, saveProject: gp.saveProject, noCreateProgram: gp.noCreateProgram }
+  // Project Root is fixed to `ghidra_projects/<username>/`.
+  const gproj: any = {
+    projectRoot: computedProjectRoot.value,
+    mode: gp.mode,
+    saveProject: gp.saveProject,
+    noCreateProgram: gp.noCreateProgram
+  }
   if (gp.name) gproj.name = gp.name
-  if (gp.forkTo) gproj.forkTo = gp.forkTo
+  // For fork mode, default an empty forkTo to the standard
+  // `<original>_forked_<N>` pattern so the saved config is always usable
+  // without further edits.
+  if (gp.mode === 'fork') {
+    const forkTarget = (gp.forkTo || '').trim() || defaultForkName.value
+    gproj.forkTo = forkTarget
+  }
   gproj.forkOnTask = gp.forkOnTask
   gproj.overwriteProject = gp.overwriteProject
   gproj.deletePreviousProgram = gp.deletePreviousProgram
@@ -807,13 +977,34 @@ function jsonToGui(json: string) {
     gui.general.processor = general.processor || 'n/a'
     gui.general.autoAnalysisTimeout = general.autoAnalysisTimeout || 180
     gui.general.threads = general.threads || 1
-    gui.general.logsRoot = general.logsRoot || ''
-    gui.general.workspaceRoot = general.workspaceRoot || ''
+    // Logs Root and Workspace Root are not user-editable; we keep the GUI
+    // state empty so the computed fixed path is always emitted on save.
+    gui.general.logsRoot = ''
+    gui.general.workspaceRoot = ''
 
     const gproj = proc.withGhidraProject || {}
-    gui.ghidra.projectRoot = gproj.projectRoot || 'ghidra_projects'
-    gui.ghidra.name = gproj.name || ''
-    gui.ghidra.mode = gproj.mode || 'new'
+    // Project Root is also not user-editable.
+    gui.ghidra.projectRoot = ''
+    // Decide whether the JSON describes a "new project" or an existing
+    // one. We consider a project "existing" only if its name matches one
+    // we know about on disk; otherwise we default to new.
+    const knownNames = new Set(ghidraProjectOptions.value.map(p => p.name))
+    const loadedName = gproj.name || ''
+    if (loadedName && knownNames.has(loadedName)) {
+      ghidraProjectSelection.value = loadedName
+      gui.ghidra.name = loadedName
+      // Default mode from JSON if valid, else `base`.
+      const mode = gproj.mode
+      if (mode === 'fork' || mode === 'base') {
+        gui.ghidra.mode = mode
+      } else {
+        gui.ghidra.mode = 'base'
+      }
+    } else {
+      ghidraProjectSelection.value = NEW_PROJECT_SENTINEL
+      gui.ghidra.name = loadedName
+      gui.ghidra.mode = 'new'
+    }
     gui.ghidra.forkTo = gproj.forkTo || ''
     gui.ghidra.forkOnTask = gproj.forkOnTask || false
     gui.ghidra.saveProject = gproj.saveProject || false
@@ -894,8 +1085,14 @@ function newRuntimeConfig() {
   // Reset GUI to defaults
   gui.username = 'akiba'; gui.password = 'akiba'; gui.usingInstance = 'akiba-instance'
   gui.general.binariesRoot = ''; gui.general.importRoot = ''; gui.general.processor = 'n/a'
-  gui.general.autoAnalysisTimeout = 180; gui.general.threads = 1; gui.general.logsRoot = ''; gui.general.workspaceRoot = ''
-  gui.ghidra.projectRoot = 'ghidra_projects'; gui.ghidra.name = 'my_project'; gui.ghidra.mode = 'new'
+  gui.general.autoAnalysisTimeout = 180; gui.general.threads = 1
+  // Logs Root and Workspace Root are fixed; no user-editable state needed.
+  gui.general.logsRoot = ''; gui.general.workspaceRoot = ''
+  // Reset Ghidra project to "create new" with auto-generated default name.
+  ghidraProjectSelection.value = NEW_PROJECT_SENTINEL
+  gui.ghidra.projectRoot = ''
+  gui.ghidra.name = defaultNewProjectName.value
+  gui.ghidra.mode = 'new'
   gui.ghidra.forkTo = ''; gui.ghidra.forkOnTask = false; gui.ghidra.saveProject = true; gui.ghidra.noCreateProgram = false
   gui.ghidra.overwriteProject = false; gui.ghidra.deletePreviousProgram = false
   gui.sqlSource.serverIP = '127.0.0.1'; gui.sqlSource.serverPort = 31777; gui.sqlSource.useSnapshot = 'current'
@@ -911,13 +1108,18 @@ function newRuntimeConfig() {
   configMessage.value = ''
 }
 
-function loadRuntimeConfig(name: string) {
+async function loadRuntimeConfig(name: string) {
   activeConfig.value = name
   const cfg = runtimeConfigs.value.find((c) => c.name === name)
   if (cfg) {
     runtimeConfigName.value = cfg.name
     runtimeConfigJson.value = cfg.json
     runtimeConfigDesc.value = cfg.description || ''
+    // Ensure the project dropdown is up-to-date before mapping the JSON's
+    // project name back to either "+ New Project" or an existing entry.
+    // Without this, a freshly created config that references an existing
+    // project could mis-classify as a new project on first load.
+    await loadGhidraProjects()
     // Auto-populate GUI from loaded JSON
     jsonToGui(cfg.json)
     // Default to GUI mode with parsed data
@@ -977,6 +1179,46 @@ async function deleteRuntimeConfig() {
   } finally {
     savingConfig.value = false
   }
+}
+
+// Allow Tab / Shift+Tab in JSON textareas
+function handleTabKey(e: KeyboardEvent) {
+  if (e.key !== 'Tab') return
+  e.preventDefault()
+  const target = e.target as HTMLTextAreaElement
+  const start = target.selectionStart
+  const end = target.selectionEnd
+  const value = target.value
+
+  if (e.shiftKey) {
+    // Shift+Tab: un-indent selected lines
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    const lineEnd = value.indexOf('\n', end)
+    const effectiveEnd = lineEnd >= 0 ? lineEnd : value.length
+    const lines = value.substring(lineStart, effectiveEnd).split('\n')
+    const unindented = lines.map(line => line.startsWith('\t') ? line.slice(1) : line.startsWith('    ') ? line.slice(4) : line)
+    target.value = value.substring(0, lineStart) + unindented.join('\n') + value.substring(effectiveEnd)
+    const removedChars = lines.reduce((sum, l) => sum + (l.startsWith('\t') ? 1 : l.startsWith('    ') ? 4 : 0), 0)
+    target.selectionStart = start
+    target.selectionEnd = end - removedChars
+  } else {
+    // Tab: indent at cursor or selected lines
+    if (start === end) {
+      target.value = value.substring(0, start) + '\t' + value.substring(end)
+      target.selectionStart = target.selectionEnd = start + 1
+    } else {
+      const lineStart = value.lastIndexOf('\n', start - 1) + 1
+      const lineEnd = value.indexOf('\n', end)
+      const effectiveEnd = lineEnd >= 0 ? lineEnd : value.length
+      const lines = value.substring(lineStart, effectiveEnd).split('\n')
+      const indented = lines.map(line => '\t' + line)
+      target.value = value.substring(0, lineStart) + indented.join('\n') + value.substring(effectiveEnd)
+      target.selectionStart = lineStart
+      target.selectionEnd = lineStart + lines.length + indented.join('\n').length
+    }
+  }
+
+  target.dispatchEvent(new Event('input', { bubbles: true }))
 }
 </script>
 

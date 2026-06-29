@@ -15,7 +15,7 @@ import type {
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 600000, // 10 min — file imports with many files can take long
+  timeout: 720000, // 12 min — lets the backend's 10 min agent timeout respond first
   headers: {
     'Content-Type': 'application/json'
   }
@@ -107,11 +107,26 @@ export const scriptApi = {
 }
 
 export const agentApi = {
-  listSessions: (limit = 50, offset = 0) =>
+  listSessions: (limit = 50, offset = 0, parentSessionId?: string | null) =>
     api.get<{ sessions: AgentSession[] }>('/agent/sessions', {
-      params: { limit, offset }
+      params: {
+        limit,
+        offset,
+        // Backend defaults to top-level only; explicit null means "all"
+        parentSessionId: parentSessionId === undefined ? null : parentSessionId
+      }
     }),
-  createSession: (payload: { sessionName?: string; systemPrompt?: string; modelName?: string; binaryId?: number; projectName?: string; projectMode?: 'new' | 'existing' } = {}) =>
+  listChildren: (parentSessionId: string) =>
+    api.get<{ children: AgentSession[] }>(`/agent/sessions/${parentSessionId}/children`),
+  createSession: (payload: {
+    sessionName?: string
+    systemPrompt?: string
+    modelName?: string
+    binaryId?: number
+    projectName?: string
+    projectMode?: 'new' | 'existing'
+    parentSessionId?: string
+  } = {}) =>
     api.post<AgentSession>('/agent/sessions', payload),
   getMessages: (sessionId: string) =>
     api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number }>(`/agent/sessions/${sessionId}/messages`),
@@ -122,8 +137,21 @@ export const agentApi = {
     }),
   deleteSession: (sessionId: string) =>
     api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
-  exportSession: (sessionId: string) =>
-    api.get(`/agent/sessions/${sessionId}/export`, { responseType: 'blob' })
+  /**
+   * Download a session's transcript as Markdown.
+   *
+   * - `scope=self` (default): legacy behaviour, returns just the requested
+   *   session's transcript — useful when the user wants only their own
+   *   session and no sub-agents.
+   * - `scope=tree`: returns a Markdown document containing the full
+   *   agent tree (root + every descendant) with per-layer statistics
+   *   and one peer section per agent.
+   */
+  exportSession: (sessionId: string, scope: 'self' | 'tree' = 'self') =>
+    api.get(`/agent/sessions/${sessionId}/export`, {
+      params: { scope },
+      responseType: 'blob'
+    })
 }
 
 export const workflowApi = {
@@ -172,6 +200,12 @@ export const fileApi = {
     }),
   delete: (fileIds: number[]) =>
     api.delete<{ message: string }>('/files', { data: { fileIds } })
+}
+
+export const projectApi = {
+  list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
+  exportProject: (name: string) =>
+    api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' })
 }
 
 export interface FileSearchResult {

@@ -23,6 +23,10 @@
           <span class="icon">⚙️</span>
           <span>Workflows</span>
         </router-link>
+        <router-link to="/projects" class="nav-item">
+          <span class="icon">🗂️</span>
+          <span>Projects</span>
+        </router-link>
         <router-link to="/files" class="nav-item">
           <span class="icon">📁</span>
           <span>Files</span>
@@ -83,6 +87,7 @@ const currentRoute = computed(() => {
     scripts: 'Scripts',
     agent: 'Agent',
     workflows: 'Workflows',
+    projects: 'Ghidra Projects',
     files: 'Files',
     query: 'Query',
     skills: 'Skills',

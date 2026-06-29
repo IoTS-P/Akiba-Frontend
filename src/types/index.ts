@@ -69,15 +69,46 @@ export interface FileResponse {
 
 // ---- Agent (chat) ----------------------------------------------------------
 
+/**
+ * Runtime state of an agent session. The backend stores this enum
+ * in `agent_sessions.runtime_state` and mirrors the same value into
+ * the `status` column for legacy views. `closed` is the only
+ * "normal" terminal state (covers both successful close and user
+ * cancel — the difference is captured in `closing_reason`);
+ * `error` is the failure terminal state.
+ */
+export type AgentRuntimeState =
+  | 'running'
+  | 'standby'
+  | 'msghandle'
+  | 'cancelling'
+  | 'closed'
+  | 'error'
+
+/**
+ * Wire value for `status`. Under the new model the value mirrors
+ * {@link AgentRuntimeState}; the legacy strings are accepted here
+ * for tolerance during the migration window.
+ */
+export type AgentSessionStatus = AgentRuntimeState | 'completed' | 'cancelled' | 'failed' | 'active' | string
+
 export interface AgentSession {
   sessionId: string
   sessionName: string | null
-  status: string
+  status: AgentSessionStatus
+  /** Same value as `status` — exposed for callers that want to be explicit. */
+  runtimeState?: AgentSessionStatus | null
   modelName: string | null
   projectName?: string | null
   moduleName?: string | null
   createdAt: string | null
   updatedAt: string | null
+  /**
+   * Parent session id, set for child agents spawned by `spawn_sub_agent`.
+   * Null for top-level sessions. The default session list filters these
+   * out; the tree view uses it to render the parent → child graph.
+   */
+  parentSessionId?: string | null
 }
 
 export interface AgentMessage {
@@ -88,6 +119,33 @@ export interface AgentMessage {
   createdAt: string | null
   toolName?: string
   toolResult?: string
+}
+
+/**
+ * Summary of a sub-agent invocation returned by `spawn_sub_agent`.
+ * Parsed from the tool result JSON.
+ */
+export interface SubAgentSummary {
+  templateId?: string
+  templateVersion?: string
+  name?: string
+  sessionId: string
+  parentSessionId?: string
+  depth?: number
+  strategy?: string
+  tools?: string[]
+  iterations: number
+  toolCalls: number
+  stopReason: string
+  totalInputTokens?: number
+  totalOutputTokens?: number
+  output: string
+}
+
+export interface GhidraProjectInfo {
+  name: string
+  sessionCount: number
+  fileCount: number
 }
 
 export interface ChatTurnResponse {
