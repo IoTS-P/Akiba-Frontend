@@ -10,7 +10,9 @@ import type {
   QueryResponse,
   AgentSession,
   AgentMessage,
-  ChatTurnResponse
+  ChatTurnResponse,
+  ConversationSummary,
+  ConversationMessage
 } from '@/types'
 
 const api = axios.create({
@@ -112,10 +114,29 @@ export const agentApi = {
       params: {
         limit,
         offset,
-        // Backend defaults to top-level only; explicit null means "all"
-        parentSessionId: parentSessionId === undefined ? null : parentSessionId
+        // The backend interprets a missing/empty `parentSessionId`
+        // as "top-level only" (see AgentOps.ListSessions: `null` →
+        // `parent_session_id IS NULL`), a literal `'ALL'` as "every
+        // session", and anything else as a UUID filter.
+        //
+        // IMPORTANT: we must NOT serialise `undefined` as the string
+        // `"null"`, otherwise the daemon would try to use `"null"` as
+        // a UUID and fail.  We also must not serialise `null` as the
+        // string `"null"`.  We only add the param when the caller
+        // provided a value (i.e. `parentSessionId` is not
+        // `undefined`).
+        ...(parentSessionId !== undefined && { parentSessionId })
       }
     }),
+  /**
+   * Fetch a single session by id.  Used by the frontend to poll
+   * the active session's status without re-downloading the full
+   * list (the existing list poll would return up to 200 rows).  The
+   * `status` field is what feeds the status pill in the chat
+   * header and the badge in the session list.
+   */
+  getSession: (sessionId: string) =>
+    api.get<AgentSession>(`/agent/sessions/${sessionId}`),
   listChildren: (parentSessionId: string) =>
     api.get<{ children: AgentSession[] }>(`/agent/sessions/${parentSessionId}/children`),
   createSession: (payload: {
@@ -151,7 +172,23 @@ export const agentApi = {
     api.get(`/agent/sessions/${sessionId}/export`, {
       params: { scope },
       responseType: 'blob'
-    })
+    }),
+  /**
+   * List all conversations (mailbox threads) the session is a
+   * participant in.  Used by the right-side conversation panel.
+   */
+  listConversations: (sessionId: string, status?: 'all' | 'active' | 'closed') =>
+    api.get<{ sessionId: string; totalConversations: number; returned: number; conversations: ConversationSummary[] }>(
+      `/agent/sessions/${sessionId}/conversations`,
+      { params: { status: status ?? 'all' } }
+    ),
+  /**
+   * Fetch the full message history of a single conversation.
+   */
+  getConversation: (sessionId: string, conversationId: number | string) =>
+    api.get<{ conversationId: number; messageCount: number; messages: ConversationMessage[] }>(
+      `/agent/sessions/${sessionId}/conversations/${conversationId}`
+    ),
 }
 
 export const workflowApi = {
@@ -205,7 +242,48 @@ export const fileApi = {
 export const projectApi = {
   list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
   exportProject: (name: string) =>
-    api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' })
+    api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' }),
+  exportTextStatus: (name: string) =>
+    api.get<ExportTextStatus>(`/projects/${encodeURIComponent(name)}/export_text/status`),
+  exportText: (name: string, options: ExportTextRequest) =>
+    api.post(`/projects/${encodeURIComponent(name)}/export_text`, options, { responseType: 'blob' }),
+}
+
+export interface ExportTextStatus {
+  projectName: string
+  projectExists: boolean
+  state: string  // "available" | "in_use" | "project_not_found"
+  activeProject: string | null
+  reasons: ExportTextReason[]
+  hints: string[]
+  agentSessionsChecked: boolean
+}
+
+export interface ExportTextReason {
+  code: string
+  activeProject?: string | null
+  workflows?: Array<Record<string, string | null>>
+  sessions?: Array<Record<string, string | null>>
+}
+
+export interface ExportTextRequest {
+  format?: string
+  contents?: string[]
+  includeComments?: boolean
+  includeEolComment?: boolean
+  includePlateComment?: boolean
+  includePreComment?: boolean
+  includePostComment?: boolean
+  includeRepeatableComment?: boolean
+  includeDecompile?: boolean
+  decompileTimeoutSec?: number
+  includeData?: boolean
+  includeUndefined?: boolean
+  functionFilter?: string | null
+  addressFilter?: { start: string; end: string } | null
+  maxFunctions?: number
+  maxFunctionSize?: number
+  sortBy?: string
 }
 
 export interface FileSearchResult {

@@ -98,11 +98,29 @@ export interface AgentSession {
   status: AgentSessionStatus
   /** Same value as `status` — exposed for callers that want to be explicit. */
   runtimeState?: AgentSessionStatus | null
+  /** Lifecycle declared at spawn time (`one_shot` or `standby`). */
+  lifecycle?: string | null
   modelName: string | null
   projectName?: string | null
   moduleName?: string | null
   createdAt: string | null
   updatedAt: string | null
+  /**
+   * Human-readable reason captured when the session entered a
+   * terminal / error state. Populated by the backend whenever
+   * `runtime_state` transitions to `closed` / `error` / `cancelled`.
+   * The frontend surfaces this as an error banner when the
+   * session is in an `error` state.
+   */
+  closingReason?: string | null
+  /**
+   * Convenience alias for error displays. The backend fills this
+   * with the same value as [closingReason] when
+   * `runtimeState == "error"`, and `null` otherwise. Kept as a
+   * separate field so the frontend does not need to re-derive
+   * the "is this an error reason?" predicate.
+   */
+  errorMessage?: string | null
   /**
    * Parent session id, set for child agents spawned by `spawn_sub_agent`.
    * Null for top-level sessions. The default session list filters these
@@ -140,6 +158,34 @@ export interface SubAgentSummary {
   totalInputTokens?: number
   totalOutputTokens?: number
   output: string
+}
+
+// ---- Conversations (mailbox) -----------------------------------------------
+
+/** A conversation summary as returned by GET /agent/sessions/{id}/conversations */
+export interface ConversationSummary {
+  conversationId: number
+  status: string
+  participants: string[]
+  messageCount: number
+  unhandledCount: number
+  lastMessagePreview: string | null
+  lastMessageKind: string | null
+  lastMessageAt: string | null
+  lastMessageSubject: string | null
+}
+
+/** A single message in a conversation, returned by GET /agent/sessions/{id}/conversations/{convId} */
+export interface ConversationMessage {
+  messageId: number
+  senderSessionId: string
+  recipientSessionId: string
+  kind: string
+  subject: string | null
+  body: string
+  priority: number
+  acked: boolean
+  createdAt: string
 }
 
 export interface GhidraProjectInfo {

@@ -1,52 +1,110 @@
 <template>
   <div class="agent-page">
-    <aside class="session-list">
-      <div class="session-header">
-        <h3>Sessions</h3>
-        <button class="btn-primary small" @click="openNewSessionModal" :disabled="creatingSession">
-          {{ creatingSession ? '…' : '+ New' }}
-        </button>
-      </div>
-      <div class="session-hint muted small">
-        Sub-agents are hidden. Open the tree from a session to drill into them.
-      </div>
-      <div v-if="loadingSessions" class="muted small">Loading…</div>
-      <div v-else-if="sessions.length === 0" class="muted small">No sessions yet</div>
-      <ul v-else class="sessions">
-        <li
-          v-for="s in sessions"
-          :key="s.sessionId"
-          :class="{ active: s.sessionId === activeSessionId }"
-          @click="selectSession(s.sessionId)"
-          @contextmenu.prevent="openContextMenu($event, s.sessionId, s.sessionName || '')"
-        >
-          <div class="title">
-            {{ s.sessionName || 'Untitled' }}
-            <span v-if="s.parentSessionId" class="subagent-badge" title="This is a sub-agent session (child of another session)">🧩 sub-agent</span>
-            <span v-if="s.moduleName && s.moduleName !== 'chat'" class="module-badge">{{ s.moduleName }}</span>
-          </div>
-          <div class="sub">
-            <span :class="['status', s.status]">{{ s.status }}</span>
-            <span class="time">{{ formatDate(s.updatedAt || s.createdAt) }}</span>
-          </div>
-          <button
-            class="del"
-            title="Delete"
-            @click.stop="deleteSession(s.sessionId)"
-          >×</button>
-        </li>
-      </ul>
+    <aside class="session-list" :class="{ 'session-list-open': sessionListOpen }">
+      <div v-if="sessionListOpen" class="session-list-content">
+        <div class="session-header">
+          <h3>Sessions</h3>
+          <button class="btn-primary small" @click="openNewSessionModal" :disabled="creatingSession">
+            {{ creatingSession ? '…' : '+ New' }}
+          </button>
+        </div>
+        <div class="session-hint muted small">
+          Click ▸ on any session to reveal its sub-agents.
+        </div>
+        <!--
+          The list area is the only part of the panel that scrolls.
+          We isolate it into its own container so the hover card
+          below can stay pinned to the bottom of the panel
+          regardless of how far the list is scrolled.  See
+          `.session-list-scroll` for the flex/overflow setup.
+        -->
+        <div class="session-list-scroll">
+          <div v-if="loadingSessions" class="muted small">Loading…</div>
+          <div v-else-if="sessions.length === 0" class="muted small">No sessions yet</div>
+          <ul v-else class="sessions">
+            <SessionTreeItem
+              v-for="s in sessions"
+              :key="s.sessionId"
+              :session="s"
+              :depth="0"
+              :active-session-id="activeSessionId"
+              :expanded-ids="expandedSessionIds"
+              :children-map="childrenBySessionId"
+              :loading-ids="childrenLoading"
+              :flash-nonces="flashNonces"
+              @select="selectSession"
+              @delete="deleteSession"
+              @toggle="toggleSessionExpand"
+              @hover="onSessionHover"
+              @leave="onSessionLeave"
+              @context="openContextMenu"
+            />
+          </ul>
+        </div>
 
-      <!-- Right-click context menu -->
-      <div
-        v-if="ctxMenu.show"
-        class="ctx-menu"
-        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-        @click.self="ctxMenu.show = false"
-      >
-        <div class="ctx-menu-item" @click="exportSession(ctxMenu.sessionId)">📥 Export this session</div>
-        <div class="ctx-menu-item" @click="exportSessionTree(ctxMenu.sessionId)">🌳 Export full tree (this + sub-agents)</div>
+        <!--
+          Sticky hover card.  Sits below the scrolling list and
+          inside the same flex column, so its width is automatically
+          bound by the panel's inner padding.  Always-on tooltip on
+          the row itself already provides a quick read; this card
+          adds the full status row + badges + timestamp that don't
+          fit on the 244px-wide row.
+        -->
+        <div v-if="hoveredSession" class="session-hover-card" :class="`status-${hoveredStatusKey}`">
+          <div class="hover-card-row hover-card-status">
+            <span
+              :class="['status-row', hoveredSession.status, hoveredKind === 'non-terminal' ? 'status-row-active' : '']"
+              :title="statusTooltip(hoveredSession.status)"
+            >
+              <span v-if="hoveredKind === 'non-terminal'" class="status-row-dot"></span>
+              {{ statusLabel(hoveredSession.status) }}
+            </span>
+          </div>
+          <div class="hover-card-row hover-card-tags">
+            <span
+              v-if="hoveredSession.parentSessionId"
+              class="subagent-tag"
+              title="This is a sub-agent session (child of another session)"
+            >🧩 sub-agent</span>
+            <span
+              v-if="hoveredSession.moduleName && hoveredSession.moduleName !== 'chat'"
+              class="module-tag"
+            >{{ hoveredSession.moduleName }}</span>
+          </div>
+          <div class="hover-card-row hover-card-time">
+            {{ formatTime(hoveredSession.updatedAt || hoveredSession.createdAt) || '—' }}
+          </div>
+          <div
+            class="hover-card-row hover-card-uuid"
+            :title="hoveredSession.sessionId"
+          >
+            <span class="hover-card-uuid-label">UUID</span>
+            <code class="hover-card-uuid-value">{{ hoveredSession.sessionId }}</code>
+          </div>
+        </div>
+
+        <!-- Right-click context menu -->
+        <div
+          v-if="ctxMenu.show"
+          class="ctx-menu"
+          :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+          @click.self="ctxMenu.show = false"
+        >
+          <div class="ctx-menu-item" @click="exportSession(ctxMenu.sessionId)">📥 Export this session</div>
+          <div class="ctx-menu-item" @click="exportSessionTree(ctxMenu.sessionId)">🌳 Export full tree (this + sub-agents)</div>
+        </div>
       </div>
+      <button
+        class="session-list-toggle"
+        :title="sessionListOpen ? 'Hide sessions' : 'Show sessions'"
+        @click="toggleSessionList"
+      >
+        <span class="session-list-toggle-icon">{{ sessionListOpen ? '◀' : '▶' }}</span>
+        <span class="session-list-toggle-label">
+          📋
+          <span v-if="sessions.length > 0" class="session-list-count">{{ sessions.length }}</span>
+        </span>
+      </button>
     </aside>
 
     <main class="chat">
@@ -54,35 +112,87 @@
         <p>Select a session on the left, or create a new one to start chatting.</p>
       </div>
       <template v-else>
-        <!-- Chat header with a "Tree" button for sub-agent visualisation -->
+      <div class="chat-body">
+        <!-- Chat header. Sub-agent hierarchy is now visible in the left
+             session list (expand any row with ▸ to see its sub-agents), so
+             the dedicated "Tree" modal/button has been removed. -->
         <div class="chat-header">
           <div class="chat-title">
-            <span class="chat-title-name">{{ activeSessionName }}</span>
+            <span
+              class="chat-title-name"
+              :title="activeSessionMeta ? `Agent UUID: ${activeSessionMeta.sessionId}` : ''"
+            >{{ activeSessionName }}</span>
             <span v-if="activeSessionMeta" class="chat-title-meta">
-              {{ activeSessionMeta.moduleName || 'chat' }} · {{ activeSessionMeta.status }}
+              {{ activeSessionMeta.moduleName || 'chat' }}
             </span>
             <span v-if="activeSessionMeta?.parentSessionId" class="chat-title-meta">
               ·
               <button
                 class="btn-link"
-                title="Jump to parent session"
+                :title="`Jump to parent session\nUUID: ${activeSessionMeta.parentSessionId}`"
                 @click="selectSession(activeSessionMeta.parentSessionId!)"
               >↑ parent <code>{{ shortId(activeSessionMeta.parentSessionId) }}</code></button>
             </span>
           </div>
           <div class="chat-actions">
-            <button
-              class="btn-secondary small"
-              :disabled="treeLoading"
-              :title="liveChildCount > 0
-                ? `${liveChildCount} sub-agent${liveChildCount === 1 ? '' : 's'} — click to view hierarchy`
-                : 'No sub-agents detected yet (live-updating)'"
-              @click="openTreeView"
+            <!--
+              Wake segment selector: appears when the session has 2+
+              wake events.  Lets the user filter the message list to
+              a specific wake without scrolling through the entire
+              conversation.  "-1" = "All" (show every message).
+            -->
+            <select
+              v-if="wakeSegments.length > 1"
+              v-model.number="selectedWakeIndex"
+              class="wake-selector"
+              :title="`Filter messages by wake (${wakeSegments.length} wakes)`"
             >
-              🌳 Tree
-              <span v-if="liveChildCount > 0" class="tree-badge">{{ liveChildCount }}</span>
-            </button>
+              <option :value="-1">All messages</option>
+              <option
+                v-for="seg in wakeSegments"
+                :key="seg.index"
+                :value="seg.index"
+              >Wake #{{ seg.index + 1 }}: {{ seg.label }}</option>
+            </select>
+            <!--
+              Prominent agent-status pill.  This is the canonical
+              "what is my agent doing right now?" widget: a colored
+              background, an animated dot while the session is
+              non-terminal, and a clear status name.  Polled on a
+              3-second interval so the pill flips to STANDBY the
+              moment the agent emits `Enter standby mode.` and
+              back to RUNNING when a mailbox wake resumes it.
+            -->
+            <span
+              v-if="activeSessionMeta"
+              :class="statusPillClasses(activeSessionMeta.status)"
+              :title="statusTooltip(activeSessionMeta.status)"
+            >
+              <span class="status-pill-dot"></span>
+              <span class="status-pill-label">{{ statusLabel(activeSessionMeta.status) }}</span>
+            </span>
+            <!--
+              The "Tree" button was removed in favour of the left-side
+              session list, which already exposes parent/child links via
+              the ▸ expander on each row (see SessionTreeItem). The
+              "Export full tree" entry in the right-click context menu
+              is still available for users who want a Markdown dump.
+            -->
           </div>
+        </div>
+
+        <!-- Agent error banner: shown when the active session is in
+             an `error` state and the backend provided a reason.
+             Placed directly under the chat header so it is the first
+             thing the user sees, before the messages list. -->
+        <div v-if="activeSessionErrorMessage" class="agent-error-banner">
+          <span class="agent-error-icon">⚠</span>
+          <span class="agent-error-text">{{ activeSessionErrorMessage }}</span>
+          <button
+            class="agent-error-dismiss"
+            title="Dismiss (the error will reappear if the state changes again)"
+            @click="dismissedErrorSession = activeSessionId"
+          >×</button>
         </div>
 
         <div class="messages" ref="messagesEl" @scroll="onMessagesScroll">
@@ -91,10 +201,21 @@
             No messages yet. Send a message to start the conversation.
           </div>
           <div
-            v-for="m in messages"
+            v-for="m in visibleMessages"
             :key="m.messageId"
             :class="['msg', m.role]"
           >
+            <!-- Wake-event separator: rendered as a divider line -->
+            <!-- with a label, NOT as a chat bubble. -->
+            <div v-if="isWakeEventMessage(m)" class="wake-separator">
+              <div class="wake-separator-line"></div>
+              <div class="wake-separator-label">
+                <span class="wake-separator-icon">🔔</span>
+                {{ wakeEventLabel(m) }}
+              </div>
+              <div class="wake-separator-line"></div>
+            </div>
+            <template v-else>
             <div class="msg-header">
               <span class="role">{{ roleLabel(m) }}</span>
               <span class="time">{{ formatTime(m.createdAt) }}{{ m.role === 'tool' ? toolDurationLabel(m) : '' }}</span>
@@ -145,11 +266,18 @@
               <details>
                 <summary>{{ toolSummary(m) }}</summary>
                 <div class="tool-detail">
-                  <div class="tool-section">
-                    <div class="tool-label">Parameters</div>
+                  <!-- Parameters section: nested <details> so the user
+                       can independently collapse just the args even when
+                       the outer tool is expanded. State is per-DOM-node
+                       (Vue re-uses the same element thanks to the stable
+                       v-for key on the message). Default `open` matches
+                       the legacy behaviour where parameters were always
+                       visible alongside the output. -->
+                  <details class="tool-params-block" open>
+                    <summary>Parameters</summary>
                     <pre class="tool-args-text">{{ toolArgs(m) }}</pre>
-                  </div>
-                  <div class="tool-section">
+                  </details>
+                  <div class="tool-section tool-output-section">
                     <div class="tool-label">Output</div>
                     <pre class="tool-result-text" v-html="renderedToolResult(m)"></pre>
                   </div>
@@ -157,6 +285,7 @@
               </details>
             </div>
             <div v-else class="content" v-html="renderMarkdown(m.content)"></div>
+            </template>
           </div>
           <div v-if="sending" class="msg assistant pending">
             <div class="role">Akiba</div>
@@ -219,140 +348,89 @@
             </button>
           </form>
         </div>
+      </div>
+
+      <!-- Conversation panel: right-side collapsible panel showing -->
+      <!-- the agent's mailbox conversations in real time.           -->
+      <aside class="conv-panel" :class="{ 'conv-panel-open': convPanelOpen }">
+        <button
+          class="conv-panel-toggle"
+          :title="convPanelOpen ? 'Hide conversations' : 'Show conversations'"
+          @click="toggleConvPanel"
+        >
+          <span class="conv-panel-toggle-icon">{{ convPanelOpen ? '▶' : '◀' }}</span>
+          <span class="conv-panel-toggle-label">
+            💬
+            <span v-if="conversations.length > 0" class="conv-panel-count">{{ conversations.length }}</span>
+          </span>
+        </button>
+        <div v-if="convPanelOpen" class="conv-panel-content">
+          <div class="conv-panel-header">
+            <span class="conv-panel-title">Conversations</span>
+            <button class="conv-panel-refresh" title="Refresh" @click="refreshConversations" :disabled="convLoading">
+              {{ convLoading ? '…' : '↻' }}
+            </button>
+          </div>
+          <div v-if="convError" class="conv-panel-error">{{ convError }}</div>
+          <div v-if="!convLoading && conversations.length === 0" class="conv-panel-empty muted small">
+            No conversations yet.
+          </div>
+          <ul class="conv-list">
+            <li
+              v-for="conv in conversations"
+              :key="conv.conversationId"
+              :class="{ 'conv-item-active': convExpandedId === conv.conversationId }"
+              class="conv-item"
+              @click="toggleConvExpand(conv.conversationId)"
+            >
+              <div class="conv-item-header">
+                <span class="conv-item-id">conv#{{ conv.conversationId }}</span>
+                <span v-if="conv.unhandledCount > 0" class="conv-item-badge">{{ conv.unhandledCount }}</span>
+                <span class="conv-item-count">{{ conv.messageCount }} msg</span>
+                <span class="conv-item-kind" v-if="conv.lastMessageKind">{{ conv.lastMessageKind }}</span>
+              </div>
+              <div class="conv-item-preview" v-if="conv.lastMessagePreview">
+                {{ conv.lastMessagePreview.slice(0, 80) }}
+              </div>
+              <div class="conv-item-time" v-if="conv.lastMessageAt">{{ formatTime(conv.lastMessageAt) }}</div>
+              <!-- Expanded conversation messages -->
+              <div
+                v-if="convExpandedId === conv.conversationId"
+                class="conv-messages"
+                @click.stop
+              >
+                <div v-if="convMsgLoading" class="muted small">Loading messages…</div>
+                <div v-else-if="convMessages.length === 0" class="muted small">No messages found.</div>
+                <div
+                  v-for="msg in convMessages"
+                  :key="msg.messageId"
+                  class="conv-msg"
+                  :class="{ 'conv-msg-out': msg.senderSessionId === activeSessionId }"
+                >
+                  <div class="conv-msg-header">
+                    <span class="conv-msg-kind">{{ msg.kind }}</span>
+                    <span class="conv-msg-from">{{ shortId(msg.senderSessionId) }}</span>
+                    <span v-if="msg.acked" class="conv-msg-acked">✓</span>
+                  </div>
+                  <div class="conv-msg-subject" v-if="msg.subject">{{ msg.subject }}</div>
+                  <pre class="conv-msg-body">{{ msg.body }}</pre>
+                  <div class="conv-msg-time">{{ formatTime(msg.createdAt) }}</div>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </aside>
       </template>
     </main>
 
-    <!-- Sub-agent tree view modal -->
-    <div v-if="treeOpen" class="modal" @click.self="closeTreeView">
-      <div class="modal-content tree-modal">
-        <div class="tree-modal-header">
-          <h2>Agent Tree</h2>
-          <div class="tree-modal-actions">
-            <span v-if="treePollInterval != null" class="tree-live-indicator" title="Polling every 2s for new sub-agents">
-              <span class="tree-live-dot"></span> live
-            </span>
-            <!-- Zoom controls. The SVG is scaled via CSS so all interactions
-                 (click, hover) continue to work without re-layout. -->
-            <div class="tree-zoom-group" role="group" aria-label="Zoom">
-              <button class="btn-secondary small tree-zoom-btn" @click="zoomOut" :disabled="treeZoom <= TREE_ZOOM_MIN" title="Zoom out">−</button>
-              <button class="btn-secondary small tree-zoom-btn" @click="zoomReset" title="Reset zoom">{{ Math.round(treeZoom * 100) }}%</button>
-              <button class="btn-secondary small tree-zoom-btn" @click="zoomIn" :disabled="treeZoom >= TREE_ZOOM_MAX" title="Zoom in">+</button>
-              <button class="btn-secondary small" @click="zoomFit" title="Fit to view">Fit</button>
-            </div>
-            <button class="btn-secondary small" @click="exportTreeFromModal" :disabled="exportingTree" title="Download the full agent tree as Markdown">
-              {{ exportingTree ? 'Exporting…' : '📥 Export tree' }}
-            </button>
-            <button class="btn-secondary small" @click="closeTreeView">Close</button>
-          </div>
-        </div>
-        <p class="subtitle">
-          Parent/child relationships for the current session.
-          <span v-if="treeRoot">Root: <code>{{ shortId(treeRoot.sessionId) }}</code> · {{ treeRoot.sessionName }}</span>
-        </p>
-        <div v-if="treeLoading" class="muted small">Loading tree…</div>
-        <div v-else-if="!treeRoot" class="muted small">No root session.</div>
-        <div v-else class="tree-container" ref="treeContainer">
-          <div
-            class="tree-svg-wrap"
-            :style="{ transform: treeTransform, transformOrigin: '0 0' }"
-          >
-            <svg
-              v-if="treeLayout.nodes.length > 0"
-              :width="treeLayout.width"
-              :height="treeLayout.height"
-              class="tree-svg"
-            >
-              <!-- Edges first so they sit under the nodes -->
-              <g class="tree-edges">
-                <path
-                  v-for="edge in treeLayout.edges"
-                  :key="edge.key"
-                  :d="edge.path"
-                  class="tree-edge"
-                  :class="{ 'tree-edge-active': edge.to === activeSessionId }"
-                />
-              </g>
-              <!-- Nodes -->
-              <g
-                v-for="node in treeLayout.nodes"
-                :key="node.sessionId"
-                :transform="`translate(${node.x},${node.y})`"
-                class="tree-node"
-                :class="{
-                  'tree-node-active': node.sessionId === activeSessionId,
-                  'tree-node-new': newlyAddedNodeIds.has(node.sessionId),
-                  'tree-node-running': !isTerminalStatus(node.status)
-                }"
-                @click="selectSession(node.sessionId)"
-                @dblclick="openChildSession(node.sessionId)"
-              >
-                <rect
-                  :x="-nodeWidth / 2"
-                  :y="-nodeHeight / 2"
-                  :width="nodeWidth"
-                  :height="nodeHeight"
-                  rx="6"
-                  ry="6"
-                  class="tree-node-rect"
-                  :class="{
-                    'tree-node-rect-active': node.sessionId === activeSessionId,
-                    'tree-node-rect-subagent': node.depth > 0,
-                    'tree-node-rect-running': !isTerminalStatus(node.status)
-                  }"
-                />
-                <text :y="-8" class="tree-node-name" text-anchor="middle">
-                  {{ truncate(node.sessionName || 'Untitled', 22) }}
-                </text>
-                <text :y="6" class="tree-node-meta" text-anchor="middle">
-                  {{ node.status }} · d={{ node.depth }}
-                </text>
-                <text :y="20" class="tree-node-id" text-anchor="middle">
-                  {{ shortId(node.sessionId) }}
-                </text>
-                <!-- Depth-direction hint: arrow on the left edge so the user
-                     knows which side the parent is on in this horizontal
-                     layout. -->
-                <text :x="-nodeWidth / 2 - 6" :y="4" class="tree-node-arrow" text-anchor="end">◀</text>
-              </g>
-              <!-- "+N more" pills on collapsed parents so the user can
-                   expand them on demand. Placed just to the right of the
-                   parent's node. -->
-              <g
-                v-for="marker in treeLayout.collapseMarkers"
-                :key="`collapse-${marker.parentId}`"
-                :transform="`translate(${marker.x},${marker.y})`"
-                class="tree-collapse-marker"
-                @click.stop="toggleCollapse(marker.parentId)"
-              >
-                <rect
-                  :x="-marker.width / 2"
-                  :y="-marker.height / 2"
-                  :width="marker.width"
-                  :height="marker.height"
-                  rx="18"
-                  ry="18"
-                  class="tree-collapse-rect"
-                />
-                <text class="tree-collapse-text" text-anchor="middle" dominant-baseline="middle">
-                  +{{ marker.hiddenCount }} more
-                </text>
-              </g>
-            </svg>
-            <div v-else class="muted small">
-              No sub-agents. Spawn one by calling <code>spawn_sub_agent</code> from the LLM.
-            </div>
-          </div>
-        </div>
-        <p class="muted small tree-legend">
-          The tree grows <strong>left to right</strong>: the root is at the left and each
-          column represents one more level of depth. Click a node to load its transcript.
-          Pill-shaped <em>+N more</em> markers collapse wide sibling groups so a
-          single column never overflows the viewport — click one to expand it.
-          The currently open session is highlighted in pink.
-          New nodes flash green briefly when they appear.
-        </p>
-      </div>
-    </div>
+    <!--
+      The dedicated sub-agent "Tree" modal was removed: the left-side
+      session list (SessionTreeItem) already exposes the parent/child
+      hierarchy via its ▸ expander, so a separate visual modal is
+      redundant. Users who want a Markdown dump of the tree can still
+      right-click any session and pick "Export full tree".
+    -->
 
     <!-- New session file selector modal -->
     <div v-if="showNewModal" class="modal" @click.self="showNewModal = false">
@@ -444,13 +522,72 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { agentApi, fileApi, llmConfigApi, workflowApi } from '@/services/api'
-import type { AgentSession, AgentMessage, SubAgentSummary } from '@/types'
+import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage } from '@/types'
 import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
+import SessionTreeItem from '@/components/SessionTreeItem.vue'
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
 const activeSessionId = ref<string | null>(null)
+
+/**
+ * Wake segment selector state.
+ *
+ * `selectedWakeIndex` is -1 (= "All") by default, meaning all
+ * messages are visible.  When the user picks a specific wake
+ * segment from the dropdown, only messages from that wake are
+ * shown in the messages list.
+ *
+ * A "wake segment" is the block of messages between two
+ * consecutive wake-event markers (or from the start / to the
+ * end).  Each segment's label is extracted from the wake-event
+ * message's content (the text after `[[AKIBA_WAKE_EVENT]]`).
+ */
+const selectedWakeIndex = ref(-1)
+
+/**
+ * Sessions that are not in the top-level [sessions] list but that
+ * we still need to render UI for — typically a sub-agent the user
+ * just opened from the inline tree on the left.
+ *
+ * Why a separate ref instead of `unshift`-ing into [sessions]?
+ *  - `sessions` is the list the user sees in the left panel; it
+ *    must only contain *top-level* sessions, otherwise the same
+ *    sub-agent would show up twice (once nested in its parent's
+ *    tree, once as a top-level row).
+ *  - But we still need to drive [activeSessionMeta], the chat
+ *    header status pill, the parent-jump button, etc. when the
+ *    user has selected a sub-agent.  We park the row here so the
+ *    UI can find it without polluting the left panel.
+ *
+ * Entries are inserted on `selectSession` fallback and updated
+ * in place by the per-session status poll via
+ * [applySessionUpdate].  They are dropped on:
+ *  - `loadSessions` (the page reloads → start fresh);
+ *  - `deleteSession` (the row is gone);
+ *  - `selectSession` switching to a *different* row that is
+ *    already in `sessions` (no need to keep the old transient
+ *    around; the user can re-open it later if needed).
+ */
+const transientSessionsById = ref<Record<string, AgentSession>>({})
+
+/**
+ * Look up a session by id, consulting both the top-level list
+ * and the transient map.  Returns `undefined` if no such row is
+ * known to the frontend (e.g. the user has never selected it).
+ *
+ * Every UI surface that needs the *active* session's metadata
+ * (chat header, composer gating, conversation panel, etc.)
+ * should go through this helper rather than indexing
+ * `sessions.value` directly — otherwise a selected sub-agent
+ * would silently lose its name / status / model.
+ */
+function findSessionById(id: string | null | undefined): AgentSession | undefined {
+  if (!id) return undefined
+  return sessions.value.find(s => s.sessionId === id)
+    ?? transientSessionsById.value[id]
+}
 
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
@@ -477,7 +614,7 @@ const sessionModelName = ref('')
 // covers running, parked (standby), mid-mailbox-handle, and
 // mid-cancel states — all of which are automated and uninteractable.
 const isAutomatedSession = computed(() => {
-  const s = sessions.value.find(s => s.sessionId === activeSessionId.value)
+  const s = findSessionById(activeSessionId.value)
   return !!s?.moduleName && s.moduleName !== 'chat' && !isTerminalStatus(s?.status)
 })
 
@@ -548,8 +685,7 @@ async function exportSession(sessionId: string) {
  *   - one peer section per agent (in DFS pre-order) with its own stats
  *     and its full transcript
  *
- * Used both by the right-click context menu on the session list and by
- * the dedicated "📥 Export tree" button inside the tree modal.
+ * Invoked from the right-click context menu on the session list.
  */
 async function exportSessionTree(sessionId: string) {
   ctxMenu.show = false
@@ -566,11 +702,6 @@ async function exportSessionTree(sessionId: string) {
   }
 }
 
-/** Convenience wrapper used by the tree modal's "Export tree" button. */
-function exportTreeFromModal() {
-  if (treeRoot.value) exportSessionTree(treeRoot.value.sessionId)
-}
-
 // ---- LLM config ------------------------------------------------------------
 const llmConfigs = ref<StoredKeyEntry[]>([])
 const selectedLlmConfig = ref('')
@@ -580,13 +711,21 @@ const availableModels = ref<string[]>([])
 onMounted(async () => {
   await Promise.all([loadSessions(), loadLlmConfigs()])
 
+  // Start the list-level status poll so the session list badges
+  // stay in sync with the DB even when the user is not actively
+  // switching sessions.  Slower cadence than the per-session
+  // poll (LIST_POLL_MS vs STATUS_POLL_MS).
+  startListPolling()
+
   // Check URL params for a pre-selected session (e.g. from workflow detail)
   const params = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search)
   const presetSession = params.get('sessionId')
 
   if (presetSession) {
-    // Find it in the loaded sessions list
-    const found = sessions.value.find(s => s.sessionId === presetSession)
+    // Find it in either the top-level list or the transient map
+    // (the latter covers preset = sub-agent, e.g. a deep link into
+    // a sub-agent session).
+    const found = findSessionById(presetSession)
     if (found) {
       await selectSession(found.sessionId)
       return
@@ -606,6 +745,10 @@ onMounted(async () => {
       activeSessionId.value = presetSession
       messages.value = data.messages || []
       await scrollToBottom()
+      // The preset path skipped selectSession() so the per-session
+      // status poll never started; start it now so the header pill
+      // follows the preset session.
+      startStatusPolling()
     } catch {
       // Fallback to default
       if (sessions.value.length > 0 && llmConfigs.value.length > 0) {
@@ -623,6 +766,16 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
+  stopStatusPolling()
+  stopListPolling()
+  // Clear the hover card's leave-debounce timer to prevent a
+  // dangling setTimeout from firing after unmount and clobbering
+  // a now-orphaned ref.
+  if (hoverLeaveTimer != null) {
+    clearTimeout(hoverLeaveTimer)
+    hoverLeaveTimer = null
+  }
+  hoveredSession.value = null
 })
 
 async function loadLlmConfigs() {
@@ -649,6 +802,206 @@ function onLlmConfigChange() {
 }
 
 // ---- Sessions ---------------------------------------------------------------
+// Toggle for the left-side session list. Mirrors the right-side
+// `conv-panel-open` UX: collapsed shows only a 36px-wide handle button
+// (with the session count), expanded reveals the full 280px panel.
+// Default `true` preserves the legacy behaviour where the list was
+// always visible — switching sessions is a primary action and the user
+// should not have to expand a panel to do it.
+const sessionListOpen = ref(true)
+
+function toggleSessionList() {
+  sessionListOpen.value = !sessionListOpen.value
+}
+
+// ---- Inline sub-agent tree (left-side list) ---------------------------
+//
+// The previous design hid sub-agents behind a dedicated Tree modal;
+// with `SessionTreeItem` (recursive list item), the user can expand
+// any session inline to reveal its direct sub-agents, and recursively
+// expand any of those that themselves have children.  The state lives
+// here in `Agent.vue` (not inside the component) so that:
+//   * multiple `SessionTreeItem` instances share one cache, and
+//   * we can clear / refresh it from the existing status / list polls
+//     without re-mounting any list item.
+const expandedSessionIds = ref<Set<string>>(new Set())
+const childrenBySessionId = ref<Record<string, AgentSession[]>>({})
+const childrenLoading = ref<Set<string>>(new Set())
+
+/**
+ * Per-session "flash nonce" — incremented every time the
+ * frontend detects a status change for that session.  The
+ * `SessionTreeItem` row binds this value as `:key` on a flash
+ * overlay element, so each increment forces Vue to recreate
+ * the overlay and restart its CSS colour-flash animation.
+ *
+ * The nonce never decreases; the overlay element stays in the
+ * DOM at opacity:0 after the animation completes, so there is
+ * no need to clean it up.  A value of `0` (the default for
+ * sessions that have never changed) means "no flash yet" and
+ * the overlay is not rendered at all (`v-if="flashNonce > 0"`).
+ */
+const flashNonces = ref<Record<string, number>>({})
+
+/**
+ * Bump the flash nonce for [sessionId] so the left-side row
+ * briefly flashes in the session's new status colour.  Called
+ * from [mergeSession] (and the sub-agent cache refresh in
+ * [refreshAllStatuses]) whenever `fresh.status` differs from
+ * the locally-cached `status`.
+ *
+ * Creating a fresh object (rather than mutating in place) keeps
+ * Vue's reactivity reliable without depending on deep-watch
+ * internals.
+ */
+function markSessionStatusChanged(sessionId: string) {
+  const next = { ...flashNonces.value }
+  next[sessionId] = (next[sessionId] || 0) + 1
+  flashNonces.value = next
+}
+
+/**
+ * Toggle the expand/collapse state of one session in the inline tree.
+ *
+ *  * If the session is currently collapsed, mark it expanded AND
+ *    kick off a fetch for its direct children.
+ *  * If the session is already expanded, just collapse it; the
+ *    children are kept in the cache for the next expand.
+ *
+ *  We intentionally re-fetch even on a previously-cached empty
+ *  list: a parent that had no sub-agents at the last visit may
+ *  have spawned one since.  Re-fetching on every expand is the
+ *  simplest way to let the count badge appear the moment a
+ *  child comes into existence, without polling every parent's
+ *  children list every 6s.  `loadChildrenFor` is idempotent via
+ *  the `childrenLoading` set, so a stuck click cannot stack
+ *  parallel requests.
+ */
+async function toggleSessionExpand(sessionId: string) {
+  const next = new Set(expandedSessionIds.value)
+  if (next.has(sessionId)) {
+    next.delete(sessionId)
+    expandedSessionIds.value = next
+    return
+  }
+  next.add(sessionId)
+  expandedSessionIds.value = next
+  // Always kick off a fetch on expand.  For an already-known
+  // parent this is a small redundant call, but it ensures a
+  // previously-empty parent can "discover" newly-spawned
+  // children without the user having to refresh the whole list.
+  if (childrenLoading.value.has(sessionId)) return
+  await loadChildrenFor(sessionId)
+}
+
+/**
+ * Fetch the direct children of [sessionId] and store them in the
+ * cache.  Idempotent against concurrent calls — the loading set
+ * guards against stacking parallel requests for the same parent.
+ */
+async function loadChildrenFor(sessionId: string) {
+  if (childrenLoading.value.has(sessionId)) return
+  const loading = new Set(childrenLoading.value)
+  loading.add(sessionId)
+  childrenLoading.value = loading
+  try {
+    const { data } = await agentApi.listChildren(sessionId)
+    childrenBySessionId.value = {
+      ...childrenBySessionId.value,
+      [sessionId]: data.children || [],
+    }
+  } catch {
+    // On error, store an empty list so the UI doesn't keep retrying
+    // on every expand click.  The user can collapse and re-expand
+    // (or wait for the next status poll) to try again.
+    childrenBySessionId.value = {
+      ...childrenBySessionId.value,
+      [sessionId]: [],
+    }
+  } finally {
+    const done = new Set(childrenLoading.value)
+    done.delete(sessionId)
+    childrenLoading.value = done
+  }
+}
+
+/**
+ * Drop cached children for a parent — used when one of its children
+ * is deleted so the parent's "N sub-agents" badge stays accurate.
+ */
+function invalidateChildrenFor(parentId: string) {
+  if (childrenBySessionId.value[parentId] === undefined) return
+  const next = { ...childrenBySessionId.value }
+  delete next[parentId]
+  childrenBySessionId.value = next
+}
+
+// ---- Sticky hover card --------------------------------------------------
+//
+// Each `SessionTreeItem` fires `hover` / `leave` events.  We keep
+// the most recently hovered session in `hoveredSession` and render
+// a sticky card at the bottom of the panel (see template).  This is
+// preferable to v3's per-row absolutely-positioned sub-popup, which
+// got clipped by the panel's `overflow-y: auto` and whose width
+// did not align with the panel's inner padding.
+//
+// We use a small `setTimeout` debounce on `leave` so the card does
+// not flicker as the pointer briefly passes through a 1px gap
+// between rows.
+
+const hoveredSession = ref<AgentSession | null>(null)
+let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function onSessionHover(session: AgentSession) {
+  if (hoverLeaveTimer != null) {
+    clearTimeout(hoverLeaveTimer)
+    hoverLeaveTimer = null
+  }
+  // Avoid re-triggering reactivity for the same row.
+  if (hoveredSession.value?.sessionId !== session.sessionId) {
+    hoveredSession.value = session
+  }
+}
+
+function onSessionLeave(session: AgentSession) {
+  // Only clear the card if the leaving session is the one we are
+  // currently showing.  This is the case when the pointer moves
+  // directly to a *different* row (whose own `hover` event will
+  // overwrite `hoveredSession` immediately, before the timer
+  // fires).  We keep a small timeout so micro-gaps between rows
+  // do not flash the card empty.
+  if (hoveredSession.value?.sessionId !== session.sessionId) return
+  if (hoverLeaveTimer != null) clearTimeout(hoverLeaveTimer)
+  hoverLeaveTimer = setTimeout(() => {
+    hoveredSession.value = null
+    hoverLeaveTimer = null
+  }, 80)
+}
+
+/** Lowercased status key for the hover card's `status-` class. */
+const hoveredStatusKey = computed(() => {
+  const s = (hoveredSession.value?.status ?? '').toLowerCase()
+  switch (s) {
+    case 'active':    return 'running'
+    case 'suspended': return 'standby'
+    default:          return s || 'unknown'
+  }
+})
+
+/** Lifecycle classification for the hover card's status dot. */
+const hoveredKind = computed<'non-terminal' | 'terminal' | 'unknown'>(() => {
+  const s = (hoveredSession.value?.status ?? '').toLowerCase()
+  if (
+    s === 'running' || s === 'standby' || s === 'msghandle' ||
+    s === 'cancelling' || s === 'active' || s === 'suspended'
+  ) return 'non-terminal'
+  if (
+    s === 'closed' || s === 'error' ||
+    s === 'completed' || s === 'cancelled' || s === 'failed'
+  ) return 'terminal'
+  return 'unknown'
+})
+
 const showNewModal = ref(false)
 const fileSearchQuery = ref('')
 const searchResults = ref<FileSearchResult[]>([])
@@ -675,6 +1028,10 @@ async function loadSessions() {
   try {
     const { data } = await agentApi.listSessions()
     sessions.value = data.sessions || []
+    // Fresh page load → drop any sub-agent rows we were holding
+    // for the previous session.  The next `selectSession` will
+    // re-populate `transientSessionsById` on demand.
+    transientSessionsById.value = {}
   } catch (e) {
     console.error('Failed to load sessions:', e)
   } finally {
@@ -785,6 +1142,23 @@ let messagePollInterval: number | null = null
 const NORMAL_POLL_MS = 3000
 const ACTIVE_CHAT_POLL_MS = 750
 
+/**
+ * `closed` and `error` are the only terminal states under the unified
+ * enum.  Legacy strings (`completed` / `cancelled` / `failed`) are
+ * accepted for tolerance during the migration window and treated as
+ * their new equivalents.
+ *
+ * Used by [isAutomatedSession] to detect "still running" sessions
+ * (running / standby / msghandle / cancelling — all automated and
+ * uninteractable).  Returning `false` for `null` is intentional: we
+ * do not want an unknown status to lock the composer.
+ */
+function isTerminalStatus(s: string | null | undefined): boolean {
+  if (s == null) return false
+  return s === 'closed' || s === 'error' ||
+      s === 'completed' || s === 'cancelled' || s === 'failed'
+}
+
 async function refreshMessages() {
   if (!activeSessionId.value) return
   try {
@@ -807,19 +1181,356 @@ function startMessagePolling(intervalMs = NORMAL_POLL_MS) {
   messagePollInterval = window.setInterval(refreshMessages, intervalMs)
 }
 
+// ============================================================
+// Status helpers + periodic status poll
+// ============================================================
+//
+// The legacy code only refreshed the session list on
+// `onMounted` and after a `createSession` / `deleteSession`, so
+// the badges in the session list and the meta text in the chat
+// header could be frozen on a stale "running" long after the
+// agent transitioned to STANDBY.  Two pollers fix this:
+//
+//  1. `refreshActiveStatus` — fires every `STATUS_POLL_MS` for
+//     the *active* session only.  Single-row, light query
+//     (GET /agent/sessions/{id}), feeds the prominent status
+//     pill in the chat header and refreshes the matching entry
+//     in the session list.
+//
+//  2. `refreshAllStatuses` — fires every `LIST_POLL_MS` (a
+//     slower cadence) for the full list.  Used to keep the
+//     non-active entries in the left-side list fresh, so a
+//     background agent that flips to STANDBY while another
+//     session is open still shows the new state.
+//
+// Both are started when a session is selected and stopped on
+// unmount / session switch.
+
+let statusPollInterval: number | null = null
+let listPollInterval: number | null = null
+const STATUS_POLL_MS = 3000
+const LIST_POLL_MS = 6000
+
+/**
+ * Canonical mapping from the wire `status` string to a coarse
+ * display category.  Used by the status pill / badge to pick a
+ * colour + decide whether to render the animated dot.
+ */
+function statusKind(status: string | null | undefined): 'non-terminal' | 'terminal' | 'unknown' {
+  if (!status) return 'unknown'
+  const s = status.toLowerCase()
+  if (s === 'running' || s === 'standby' || s === 'msghandle' ||
+      s === 'cancelling' || s === 'active' || s === 'suspended') {
+    return 'non-terminal'
+  }
+  if (s === 'closed' || s === 'error' ||
+      s === 'completed' || s === 'cancelled' || s === 'failed') {
+    return 'terminal'
+  }
+  return 'unknown'
+}
+
+/**
+ * Compose the full set of CSS classes for the chat-header
+ * status pill.  Two layers:
+ *  - `status-pill-${kind}` — picks the base colour (non-terminal
+ *    vs terminal).
+ *  - `status-pill-${status}` — picks the specific colour for
+ *    stand-out states (standby / cancelling / msghandle / error /
+ *    cancelled).  The specific class wins because it is declared
+ *    later in the stylesheet, so a STANDBY session renders
+ *    teal even though it is also a "non-terminal" state.
+ *  - `status-pill-active` — only on non-terminal states, used
+ *    by callers that want to flag "needs attention" without
+ *    changing colour.
+ */
+function statusPillClasses(status: string | null | undefined): string[] {
+  if (!status) return ['status-pill', 'status-pill-unknown']
+  const s = status.toLowerCase()
+  const kind = statusKind(status)
+  const out = ['status-pill', `status-pill-${kind}`]
+  if (kind === 'non-terminal') out.push('status-pill-active')
+  // Specific class — only when we have one defined.
+  const specific = [
+    'running', 'standby', 'msghandle', 'cancelling', 'active',
+    'closed', 'completed', 'cancelled', 'error', 'failed',
+  ]
+  if (specific.includes(s)) out.push(`status-pill-${s}`)
+  return out
+}
+
+/**
+ * Pretty-print the wire status for the UI.  Renames a few
+ * less-obvious enum values ("msghandle" → "Handling mail",
+ * "cancelling" → "Cancelling…") so the pill reads naturally
+ * even to a user who has never seen the enum.
+ */
+function statusLabel(status: string | null | undefined): string {
+  if (!status) return 'Unknown'
+  const s = status.toLowerCase()
+  switch (s) {
+    case 'running': return 'Running'
+    case 'standby': return 'Standby'
+    case 'msghandle': return 'Handling mail'
+    case 'cancelling': return 'Cancelling…'
+    case 'active': return 'Active'
+    case 'suspended': return 'Standby'
+    case 'closed': return 'Closed'
+    case 'completed': return 'Completed'
+    case 'cancelled': return 'Cancelled'
+    case 'failed': return 'Failed'
+    case 'error': return 'Error'
+    default: return s.charAt(0).toUpperCase() + s.slice(1)
+  }
+}
+
+/**
+ * Long-form tooltip.  The pill is a glance widget; the tooltip
+ * is the place to explain what each non-terminal state means in
+ * the framework's vocabulary (e.g. "Standby" → "parked after
+ * the primary task; wakes on incoming mailbox messages").
+ */
+function statusTooltip(status: string | null | undefined): string {
+  if (!status) return 'Unknown status'
+  const s = status.toLowerCase()
+  // Find the active session's error reason to augment the tooltip
+  // so the user can still see *why* the session failed even after
+  // dismissing the error banner.
+  const meta = activeSessionMeta.value
+  const reason = meta?.errorMessage?.trim() || meta?.closingReason?.trim() || ''
+  switch (s) {
+    case 'running': return 'Agent is actively running.'
+    case 'standby': return 'Parked after the primary task. Wakes on incoming mailbox messages.'
+    case 'msghandle': return 'Draining mailbox messages before resuming the run loop.'
+    case 'cancelling': return 'Cancellation requested; finishing the in-flight step.'
+    case 'active': return 'Agent is actively running.'
+    case 'suspended': return 'Parked after the primary task. Wakes on incoming mailbox messages.'
+    case 'closed': return 'Session closed.'
+    case 'completed': return 'Session completed successfully.'
+    case 'cancelled': return 'Session was cancelled.'
+    case 'failed': return reason ? `Session ended with a failure: ${reason}` : 'Session ended with a failure.'
+    case 'error': return reason ? `Session ended with an error: ${reason}` : 'Session ended with an error.'
+    default: return `Status: ${s}`
+  }
+}
+
+/**
+ * Refresh the active session's status in-place.  Updates the
+ * matching entry in `sessions.value` so the chat-header pill
+ * and the left-side list badge stay in sync.  Silent on
+ * network errors — the next tick will retry.
+ */
+async function refreshActiveStatus() {
+  const id = activeSessionId.value
+  if (!id) return
+  try {
+    const { data } = await agentApi.getSession(id)
+    applySessionUpdate(data)
+  } catch { /* ignore */ }
+}
+
+/**
+ * Refresh the entire session list.  Heavier than
+ * [refreshActiveStatus] so it runs on a slower cadence
+ * (LIST_POLL_MS).  Same on-error policy.
+ */
+async function refreshAllStatuses() {
+  try {
+    const { data } = await agentApi.listSessions(200, 0, 'ALL')
+    const all = data.sessions || []
+    // Build a map for O(1) status updates; new entries (e.g. a
+    // child that just spawned) get inserted, vanished entries
+    // are kept (the user may have them open in another tab).
+    const byId: Record<string, AgentSession> = {}
+    for (const s of all) byId[s.sessionId] = s
+    sessions.value = sessions.value.map(s => {
+      const fresh = byId[s.sessionId]
+      return fresh ? mergeSession(s, fresh) : s
+    })
+    // Insert any new top-level sessions we hadn't seen before.
+    for (const s of all) {
+      if (!sessions.value.some(x => x.sessionId === s.sessionId) &&
+          !s.parentSessionId) {
+        sessions.value.unshift(s)
+      }
+    }
+    // Also merge status updates into the inline sub-agent tree.
+    // For every parent that has a cached children list, refresh each
+    // known child with the latest row.  Vanished children (deleted
+    // elsewhere) are dropped so the UI doesn't show ghosts.
+    //
+    // For EXPANDED parents we additionally auto-insert any
+    // newly-spawned sub-agents found in this poll's `all` list.  This
+    // is what makes a running parent's new children appear live while
+    // it stays expanded — previously the user had to collapse and
+    // re-expand to see them.  Collapsed-but-cached parents keep the
+    // old behaviour (no auto-insert) since their children aren't
+    // visible anyway, and `toggleSessionExpand` re-fetches on the
+    // next expand.
+    const cacheEntries = Object.entries(childrenBySessionId.value)
+    if (cacheEntries.length > 0) {
+      // Group the freshly-fetched sessions by parent so we can detect
+      // new children for expanded parents in O(N) without extra
+      // network calls.
+      const byParent: Record<string, AgentSession[]> = {}
+      for (const s of all) {
+        const pid = s.parentSessionId
+        if (!pid) continue
+        ;(byParent[pid] ??= []).push(s)
+      }
+      const next: Record<string, AgentSession[]> = {}
+      for (const [parentId, kids] of cacheEntries) {
+        const updated = kids
+          .map(k => {
+            const fresh = byId[k.sessionId]
+            // Flash the row when a sub-agent's status changed
+            // since the last list poll, mirroring the behaviour
+            // in [mergeSession] for top-level rows.
+            if (fresh && fresh.status != null && fresh.status !== k.status) {
+              markSessionStatusChanged(k.sessionId)
+            }
+            return fresh
+          })
+          .filter((s): s is AgentSession => !!s)
+        // Only expanded parents pull in newly-spawned children from
+        // this poll.  Doing it for every cached parent would defeat
+        // the O(K) intent and could surprise users with rows
+        // appearing under collapsed nodes.
+        if (expandedSessionIds.value.has(parentId)) {
+          const known = new Set(updated.map(s => s.sessionId))
+          const freshKids = byParent[parentId]
+          if (freshKids) {
+            for (const nk of freshKids) {
+              if (!known.has(nk.sessionId)) updated.push(nk)
+            }
+          }
+        }
+        // Keep the cache entry even if it becomes empty after the
+        // merge — that signals "we know this parent has no
+        // children" and avoids refetching on the next expand.
+        next[parentId] = updated
+      }
+      childrenBySessionId.value = next
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Update or insert a single session in `sessions.value`.  Used
+ * by the cheaper single-row poll.  New top-level sessions
+ * land at the top of the list; sub-agents (opened from the
+ * tree) just refresh in place inside the transient map.
+ */
+function applySessionUpdate(fresh: AgentSession) {
+  const idx = sessions.value.findIndex(s => s.sessionId === fresh.sessionId)
+  if (idx >= 0) {
+    sessions.value[idx] = mergeSession(sessions.value[idx], fresh)
+    return
+  }
+  if (fresh.parentSessionId) {
+    // Sub-agent.  Only update the transient map (if we've already
+    // loaded it via `selectSession`'s fallback).  We never
+    // auto-promote a sub-agent to the top-level list — that would
+    // be the same duplicate-row bug this whole refactor is here
+    // to fix.  If the transient slot doesn't exist yet, drop the
+    // update: the next list poll (or a future select) will pick
+    // it up.
+    const existing = transientSessionsById.value[fresh.sessionId]
+    if (existing) {
+      transientSessionsById.value = {
+        ...transientSessionsById.value,
+        [fresh.sessionId]: mergeSession(existing, fresh),
+      }
+    }
+    return
+  }
+  // New top-level session.
+  sessions.value.unshift(fresh)
+}
+
+/**
+ * Field-by-field merge that preserves local-only fields (e.g.
+ * the `name` the user has on a session they opened directly
+ * via URL) while updating the volatile `status` /
+ * `runtimeState` / `updatedAt` columns.
+ *
+ * When the merged `status` differs from the locally-cached one,
+ * the row is flagged via [markSessionStatusChanged] so the
+ * left-side session list briefly flashes in the new status
+ * colour.  We compare against `local.status` (not the merged
+ * value) so a no-op refresh where the backend echoes the same
+ * status does NOT trigger a spurious flash.
+ */
+function mergeSession(local: AgentSession, fresh: AgentSession): AgentSession {
+  const statusChanged = fresh.status != null && fresh.status !== local.status
+  const merged: AgentSession = {
+    ...local,
+    status: fresh.status ?? local.status,
+    runtimeState: fresh.runtimeState ?? local.runtimeState,
+    updatedAt: fresh.updatedAt ?? local.updatedAt,
+    sessionName: fresh.sessionName ?? local.sessionName,
+    // closingReason / errorMessage are null-able and the backend
+    // sends `null` (not `undefined`) when there is no error, so a
+    // plain `?? local` would erase a real "no error anymore"
+    // transition. We only keep the local value when the backend
+    // omitted the field entirely (undefined).
+    closingReason: fresh.closingReason !== undefined ? fresh.closingReason : local.closingReason,
+    errorMessage: fresh.errorMessage !== undefined ? fresh.errorMessage : local.errorMessage,
+  }
+  if (statusChanged) {
+    markSessionStatusChanged(local.sessionId)
+  }
+  return merged
+}
+
+function startStatusPolling() {
+  stopStatusPolling()
+  // Tick once immediately so the UI doesn't lag the backend
+  // by a full interval on session switch.
+  refreshActiveStatus()
+  statusPollInterval = window.setInterval(refreshActiveStatus, STATUS_POLL_MS)
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval != null) {
+    clearInterval(statusPollInterval)
+    statusPollInterval = null
+  }
+}
+
+function startListPolling() {
+  stopListPolling()
+  refreshAllStatuses()
+  listPollInterval = window.setInterval(refreshAllStatuses, LIST_POLL_MS)
+}
+
+function stopListPolling() {
+  if (listPollInterval != null) {
+    clearInterval(listPollInterval)
+    listPollInterval = null
+  }
+}
+
 async function selectSession(id: string) {
   activeSessionId.value = id
   errorMsg.value = ''
   messages.value = []
+  selectedWakeIndex.value = -1
   tokenUsage.value = null
   loadingMessages.value = true
   // Stop previous polling
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
+  // Restart the per-session status poll so the chat-header pill
+  // follows the new active session.
+  stopStatusPolling()
 
   // Set model name from session info. If the session isn't in the list
-  // (e.g. a sub-agent opened from the tree), fall back to the messages
-  // endpoint which gives us the session implicitly via 404 if missing.
-  let session = sessions.value.find(s => s.sessionId === id)
+  // (e.g. a sub-agent opened from the tree), fall back to a global
+  // listing just for this id.  The fallback row is parked in
+  // `transientSessionsById` (NOT unshifted into `sessions.value`) so
+  // the left-side list stays a top-level-only view; the chat header
+  // still finds it via `findSessionById` / `activeSessionMeta`.
+  let session = findSessionById(id)
   if (!session) {
     // Try a "ALL" listing just for this id. If even that doesn't find it
     // (e.g. the user has lots of sessions and it fell off the page), we
@@ -828,10 +1539,23 @@ async function selectSession(id: string) {
       const { data } = await agentApi.listSessions(200, 0, 'ALL')
       session = (data.sessions || []).find(s => s.sessionId === id)
       if (session) {
-        // Add it transiently so the rest of the UI (status pill, model
-        // badge, "active" highlight) keeps working without polluting the
-        // main top-level list.
-        sessions.value.unshift(session)
+        if (session.parentSessionId) {
+          // Sub-agent: keep it out of the left-side list and store
+          // it in the transient map.  `activeSessionMeta` and the
+          // status pill will find it via `findSessionById`; the
+          // status poll will refresh it in place via
+          // `applySessionUpdate`.
+          transientSessionsById.value = {
+            ...transientSessionsById.value,
+            [session.sessionId]: session,
+          }
+        } else {
+          // Top-level session that simply hadn't shown up in
+          // `sessions.value` yet (e.g. opened from the Tree modal
+          // before the list poll caught up).  Insert it into the
+          // canonical list.
+          sessions.value.unshift(session)
+        }
       }
     } catch { /* ignore */ }
   }
@@ -853,13 +1577,57 @@ async function selectSession(id: string) {
   } finally {
     loadingMessages.value = false
   }
+  // Status poll goes LAST — it must read the up-to-date entry
+  // that `selectSession` just merged in, otherwise the first
+  // tick can re-fetch a row we already have.
+  startStatusPolling()
 }
 
 async function deleteSession(id: string) {
   if (!confirm('Delete this session?')) return
+  // Find the parent before we drop the session, so we can refresh
+  // its children count afterwards.  The session might be in the
+  // top-level list, in the transient map (if it was a sub-agent
+  // we were viewing), or in some cached `childrenBySessionId` entry.
+  const deleted = sessions.value.find(s => s.sessionId === id)
+    ?? transientSessionsById.value[id]
+    ?? Object.values(childrenBySessionId.value)
+      .flat()
+      .find(s => s.sessionId === id)
   try {
     await agentApi.deleteSession(id)
     sessions.value = sessions.value.filter((s) => s.sessionId !== id)
+    // Drop from the transient map as well so a deleted sub-agent
+    // no longer drives the chat header.
+    if (transientSessionsById.value[id] !== undefined) {
+      const next = { ...transientSessionsById.value }
+      delete next[id]
+      transientSessionsById.value = next
+    }
+    // Drop the deleted session from any cached children list so
+    // the inline tree stops showing it.  Also drop the cache entry
+    // for the parent so the next expand re-fetches with an
+    // up-to-date child count.
+    const cleaned: Record<string, AgentSession[]> = {}
+    for (const [parentId, kids] of Object.entries(childrenBySessionId.value)) {
+      const filtered = kids.filter(s => s.sessionId !== id)
+      // Only keep the cache entry if the parent still has known
+      // children OR the entry hasn't been confirmed-empty yet.
+      if (filtered.length > 0 || childrenLoading.value.has(parentId)) {
+        cleaned[parentId] = filtered
+      }
+    }
+    childrenBySessionId.value = cleaned
+    if (deleted?.parentSessionId) {
+      invalidateChildrenFor(deleted.parentSessionId)
+    }
+    // Collapse the deleted session if it was expanded so the
+    // child `<ul>` disappears immediately.
+    if (expandedSessionIds.value.has(id)) {
+      const next = new Set(expandedSessionIds.value)
+      next.delete(id)
+      expandedSessionIds.value = next
+    }
     if (activeSessionId.value === id) {
       activeSessionId.value = null
       messages.value = []
@@ -928,12 +1696,6 @@ async function scrollToBottom() {
   el.scrollTop = el.scrollHeight
 }
 
-function formatDate(date: string | null | undefined) {
-  if (!date) return ''
-  const d = new Date(date)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
-}
-
 function formatTime(date: string | null | undefined): string {
   if (!date) return ''
   const d = new Date(date)
@@ -953,6 +1715,87 @@ function roleLabel(m: AgentMessage): string {
   if (m.role === 'tool') return 'Tool'
   return m.role
 }
+
+/**
+ * Detect a wake-event marker message written by the backend when
+ * a STANDBY agent is resumed.  The backend writes a "user" message
+ * with the prefix `[[AKIBA_WAKE_EVENT]]` followed by a human-
+ * readable label describing who triggered the wake.
+ *
+ * Returns true when [m] is such a marker; the template renders a
+ * separator divider instead of a chat bubble for these messages.
+ */
+const WAKE_EVENT_PREFIX = '[[AKIBA_WAKE_EVENT]]'
+
+function isWakeEventMessage(m: AgentMessage): boolean {
+  return m.role === 'user' &&
+    (m.content ?? '').trimStart().startsWith(WAKE_EVENT_PREFIX)
+}
+
+function wakeEventLabel(m: AgentMessage): string {
+  const content = (m.content ?? '').trim()
+  // Strip the prefix and any leading whitespace.
+  const after = content.slice(WAKE_EVENT_PREFIX.length).trim()
+  return after || 'Woken from standby'
+}
+
+/**
+ * Segment messages into wake groups.  Each segment starts at a
+ * wake-event message (or the very first message if no wake event
+ * precedes it).  Returns an array of objects with `index`, `label`,
+ * and `messageIds` (a Set for O(1) membership check).
+ *
+ * Used by the wake selector dropdown and by [visibleMessages].
+ */
+const wakeSegments = computed(() => {
+  const segs: Array<{ index: number; label: string; messageIds: Set<number>; wakeMessageId?: number }> = []
+  let currentSeg: { index: number; label: string; messageIds: Set<number>; wakeMessageId?: number } | null = null
+
+  for (const m of messages.value) {
+    if (isWakeEventMessage(m)) {
+      // Start a new segment. Store the wake marker's own messageId so
+      // filtering can include exactly this marker. Labels are not unique
+      // (e.g. many cycles can be "Woken by system"), so label-based
+      // matching can accidentally pull separators from earlier/later wakes.
+      if (currentSeg) segs.push(currentSeg)
+      currentSeg = {
+        index: segs.length,
+        label: wakeEventLabel(m),
+        messageIds: new Set([m.messageId]),
+        wakeMessageId: m.messageId,
+      }
+    } else {
+      if (!currentSeg) {
+        // Messages before any wake event belong to the initial segment.
+        currentSeg = {
+          index: 0,
+          label: 'Initial',
+          messageIds: new Set(),
+        }
+      }
+      currentSeg.messageIds.add(m.messageId)
+    }
+  }
+  if (currentSeg) segs.push(currentSeg)
+  return segs
+})
+
+/**
+ * Messages visible in the chat list.  When [selectedWakeIndex] is
+ * -1 ("All"), returns all messages.  Otherwise returns only
+ * messages belonging to the selected wake segment, interleaved
+ * with the wake-event separator for context.
+ */
+const visibleMessages = computed(() => {
+  if (selectedWakeIndex.value === -1) return messages.value
+  const seg = wakeSegments.value[selectedWakeIndex.value]
+  if (!seg) return messages.value
+  // Include exactly this segment's wake-event marker plus all messages in
+  // the segment. Do NOT match wake markers by label: labels are often
+  // duplicated across cycles (e.g. repeated "Woken by system"), which made
+  // older/later wake separators appear in the wrong filtered view.
+  return messages.value.filter(m => seg.messageIds.has(m.messageId))
+})
 
 function toolSummary(m: AgentMessage): string {
   const name = m.toolName || 'tool'
@@ -1135,504 +1978,11 @@ function shortId(id?: string | null): string {
   return id.length > 8 ? id.slice(0, 8) : id
 }
 
-// ============================================================
-// Tree view (sub-agent hierarchy) — LIVE updating
-// ============================================================
-//
-// The hierarchy is *not* a static diagram: while the user is viewing
-// the tree the parent (and even sub-sub-agents) may still be running
-// and spawning more children. We therefore:
-//
-//   1. Re-fetch children of every known node on a short interval while
-//      the modal is open, and add any newly-discovered nodes/edges to
-//      the layout.
-//   2. Refresh the status / name of existing nodes so completed/error
-//      states show up without a manual reload.
-//   3. Pulse newly-added nodes briefly so the user notices them.
-//   4. Stop polling once the parent reaches a terminal state, the modal
-//      closes, or the component unmounts.
-//   5. Show a live "child count" badge on the tree button even when
-//      the modal is closed (refreshed at the same cadence).
-// ============================================================
-
-const treeOpen = ref(false)
-const treeLoading = ref(false)
-const treeRoot = ref<AgentSession | null>(null)
-/** Flat list of nodes in DFS pre-order for layout. */
-const treeNodes = ref<TreeNode[]>([])
-const treeEdges = ref<TreeEdgeStored[]>([])
-const treeContainer = ref<HTMLElement | null>(null)
-/** Session IDs that arrived during the most recent refresh — used for
- *  the brief "new" pulse animation. Cleared automatically. */
-const newlyAddedNodeIds = ref<Set<string>>(new Set())
-
-interface TreeNode {
-  sessionId: string
-  sessionName: string | null
-  status: string
-  depth: number
-}
-/** Storage shape: what we persist across refreshes. */
-interface TreeEdgeStored {
-  key: string
-  from: string
-  to: string
-}
-/** Rendered shape: what the layout emits, augmented with a Bezier path. */
-interface TreeEdgeRendered extends TreeEdgeStored {
-  path: string
-}
-
-/**
- * Layout & overflow policy
- * ------------------------
- *
- * The tree is rendered **horizontally**: the root sits in the leftmost
- * column and each additional column represents one more level of depth.
- * Sub-agents therefore appear further to the right, not further down.
- *
- * To keep a single column from becoming absurdly wide when one agent
- * spawns many siblings (a common pattern — e.g. `spawn_sub_agent`
- * in a loop), we collapse any parent with more than
- * [MAX_VISIBLE_CHILDREN] children down to a small "+N more" pill that
- * the user can expand on demand. The set of currently-collapsed parents
- * lives in [collapsedParents] and survives modal reopen + tree polls.
- *
- * Note that "collapsing" hides *all* children of a parent from the
- * layout (we don't try to keep a partial first-N visible); this keeps
- * the visual contract simple and makes even pathological cases
- * (hundreds of children) collapse to a single pill. The data is still
- * tracked in [treeNodes]/[treeEdges] so the export endpoint and stats
- * see the full tree.
- */
-const MAX_VISIBLE_CHILDREN = 6
-
-/** Session IDs of parents whose children should be hidden in the layout.
- *  Used to collapse wide sibling groups so a single column doesn't stretch
- *  across the whole viewport. */
-const collapsedParents = ref<Set<string>>(new Set())
-
-function toggleCollapse(parentId: string) {
-  const next = new Set(collapsedParents.value)
-  if (next.has(parentId)) next.delete(parentId)
-  else next.add(parentId)
-  collapsedParents.value = next
-}
-
-// ---- Zoom & pan -----------------------------------------------------------
-//
-// The tree can grow very wide (left-to-right), so we offer basic zoom
-// controls: a scale factor that scales the SVG and a "Fit" button that
-// scales the SVG to fit the visible container.
-const treeZoom = ref(1)
-const TREE_ZOOM_MIN = 0.25
-const TREE_ZOOM_MAX = 2
-const TREE_ZOOM_STEP = 0.15
-
-function zoomIn()  { treeZoom.value = Math.min(TREE_ZOOM_MAX, +(treeZoom.value + TREE_ZOOM_STEP).toFixed(2)) }
-function zoomOut() { treeZoom.value = Math.max(TREE_ZOOM_MIN, +(treeZoom.value - TREE_ZOOM_STEP).toFixed(2)) }
-function zoomReset() { treeZoom.value = 1; resetPan() }
-function zoomFit() {
-  const container = treeContainer.value
-  if (!container) return
-  const naturalW = treeLayout.value.width || 1
-  const naturalH = treeLayout.value.height || 1
-  const availW = Math.max(50, container.clientWidth - 32)
-  const availH = Math.max(50, container.clientHeight - 32)
-  const ratio = Math.min(availW / naturalW, availH / naturalH, 1)
-  treeZoom.value = Math.max(TREE_ZOOM_MIN, Math.min(TREE_ZOOM_MAX, +ratio.toFixed(2)))
-  resetPan()
-}
-
-// Manual pan state — applied via CSS transform on the SVG.
-const panX = ref(0)
-const panY = ref(0)
-function resetPan() { panX.value = 0; panY.value = 0 }
-
-/** Compose zoom + pan into a single CSS transform string. */
-const treeTransform = computed(
-  () => `translate(${panX.value}px, ${panY.value}px) scale(${treeZoom.value})`
-)
-
-const nodeWidth = 160
-const nodeHeight = 56
-const levelGapX = 90      // horizontal gap between depth columns
-const siblingGapY = 24    // vertical gap between siblings within a column
-const collapsePillW = 70
-const collapsePillH = 36
-
-const treeLayout = computed<{
-  nodes: Array<TreeNode & { x: number; y: number }>
-  edges: TreeEdgeRendered[]
-  collapseMarkers: Array<{ parentId: string; x: number; y: number; hiddenCount: number; width: number; height: number }>
-  width: number
-  height: number
-}>(() => {
-  if (treeNodes.value.length === 0) {
-    return { nodes: [], edges: [], collapseMarkers: [], width: 0, height: 0 }
-  }
-
-  // Lay out horizontally: x is the depth column, y is the vertical slot.
-  // Each subtree gets a contiguous vertical band and is centered within it.
-  const nodeIndex: Record<string, number> = {}
-  treeNodes.value.forEach((n, i) => { nodeIndex[n.sessionId] = i })
-
-  // Build parent → children adjacency, but skip children of collapsed
-  // parents so they don't take up vertical space until the user expands
-  // the group. The hidden siblings still exist in `treeNodes` for the
-  // stats endpoints, but they are excluded from the layout.
-  const childrenMap: Record<string, string[]> = {}
-  for (const e of treeEdges.value) {
-    if (collapsedParents.value.has(e.from)) continue
-    (childrenMap[e.from] ||= []).push(e.to)
-  }
-
-  const x: number[] = new Array(treeNodes.value.length).fill(0)
-  const y: number[] = new Array(treeNodes.value.length).fill(0)
-
-  // For collapsed parents, reserve one slot for the "+N more" pill at the
-  // parent's depth. We pass `visibleChildCount` so the layout knows how
-  // tall to make the parent's column.
-  function subtreeHeight(rootId: string): number {
-    if (collapsedParents.value.has(rootId)) {
-      // Collapsed parent: only itself is visible (plus its pill, which we
-      // size like a regular node). Skip descending.
-      return 1
-    }
-    const kids = childrenMap[rootId] || []
-    if (kids.length === 0) return 1
-    let total = 0
-    for (const kidId of kids) total += subtreeHeight(kidId)
-    return Math.max(total, 1)
-  }
-
-  function layoutSubtree(rootId: string, depth: number, topSlot: number): number {
-    const rootIdx = nodeIndex[rootId]
-    if (rootIdx === undefined) return 0
-    const kids = childrenMap[rootId] || []
-    const ownHeight = 1
-
-    if (kids.length === 0) {
-      x[rootIdx] = depth
-      y[rootIdx] = topSlot
-      return ownHeight
-    }
-
-    // First, recursively place children top-down starting from topSlot.
-    let cursor = topSlot
-    const childSlots: Array<{ idx: number; center: number; height: number }> = []
-    for (const kidId of kids) {
-      const kidIdx = nodeIndex[kidId]
-      if (kidIdx === undefined) continue
-      const h = subtreeHeight(kidId)
-      layoutSubtree(kidId, depth + 1, cursor)
-      const kidCenter = cursor + h / 2
-      childSlots.push({ idx: kidIdx, center: kidCenter, height: h })
-      cursor += h
-    }
-    const totalHeight = Math.max(ownHeight, cursor - topSlot)
-
-    // Place the root at the vertical midpoint of its children, clamped so
-    // it always stays inside the band [topSlot, topSlot + totalHeight].
-    const firstCenter = childSlots.length > 0 ? childSlots[0].center : topSlot
-    const lastCenter = childSlots.length > 0 ? childSlots[childSlots.length - 1].center : topSlot
-    const mid = (firstCenter + lastCenter) / 2
-    y[rootIdx] = Math.max(topSlot, Math.min(topSlot + totalHeight - ownHeight, mid))
-    x[rootIdx] = depth
-    return totalHeight
-  }
-
-  if (treeRoot.value) {
-    layoutSubtree(treeRoot.value.sessionId, 0, 0)
-  }
-
-  // Convert slot units to pixels.
-  const pxPerDepth = nodeWidth + levelGapX
-  const pxPerSibling = nodeHeight + siblingGapY
-  const padding = 32
-  const maxDepth = Math.max(...x)
-  const maxRow = Math.max(...y)
-
-  const positioned = treeNodes.value.map((n, i) => ({
-    ...n,
-    x: x[i] * pxPerDepth + padding + nodeWidth / 2,
-    y: y[i] * pxPerSibling + padding + nodeHeight / 2
-  }))
-
-  // Cubic Bezier edges from parent's right edge → child's left edge.
-  const positionedMap: Record<string, { x: number; y: number }> = {}
-  for (const n of positioned) positionedMap[n.sessionId] = { x: n.x, y: n.y }
-  const edges = treeEdges.value
-    .filter(e => !collapsedParents.value.has(e.from))
-    .map(e => {
-      const p = positionedMap[e.from]
-      const c = positionedMap[e.to]
-      if (!p || !c) return null
-      const midX = (p.x + c.x) / 2
-      const path = `M ${p.x + nodeWidth / 2},${p.y} C ${midX},${p.y} ${midX},${c.y} ${c.x - nodeWidth / 2},${c.y}`
-      return { key: e.key, from: e.from, to: e.to, path }
-    })
-    .filter((e): e is TreeEdgeRendered => e !== null)
-
-  // Render a "+N more" pill on every collapsed parent so the user can
-  // expand it. The pill sits next to (right of) the parent's node at the
-  // same depth.
-  const collapseMarkers: Array<{
-    parentId: string
-    x: number
-    y: number
-    hiddenCount: number
-    width: number
-    height: number
-  }> = []
-  for (const parentId of Object.keys(childrenMap)) {
-    if (!collapsedParents.value.has(parentId)) continue
-    const idx = nodeIndex[parentId]
-    if (idx === undefined) continue
-    const totalChildren = treeEdges.value.filter(e => e.from === parentId).length
-    const hidden = Math.max(0, totalChildren - MAX_VISIBLE_CHILDREN)
-    if (hidden <= 0) continue
-    collapseMarkers.push({
-      parentId,
-      x: positioned[idx].x + nodeWidth / 2 + 16 + collapsePillW / 2,
-      y: positioned[idx].y,
-      hiddenCount: hidden,
-      width: collapsePillW,
-      height: collapsePillH
-    })
-  }
-
-  const width = (maxDepth + 1) * pxPerDepth + padding * 2 + collapsePillW
-  const height = (maxRow + 1) * pxPerSibling + padding * 2
-
-  return { nodes: positioned, edges, collapseMarkers, width, height }
-})
-
-const treeChildCount = computed(() => treeNodes.value.filter(n => n.depth > 0).length)
-/** Reference so vue-tsc doesn't flag `treeChildCount` as unused under
- *  `noUnusedLocals` (it's only consumed from the template for debug). */
-void treeChildCount
-
-/** Live count of direct children for the *currently active* session,
- *  refreshed independently of the modal. Used by the "🌳 Tree" button
- *  label so the user knows the hierarchy has content before opening. */
-const liveChildCount = ref(0)
-let childCountInterval: number | null = null
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s
-}
-
-/**
- * Incremental, idempotent tree refresh.
- *
- * For each visited node, this either inserts a new entry into
- * [treeNodes] (and emits the corresponding edges for its newly-discovered
- * children) or updates the status / name of an existing entry.
- *
- * Already-visited nodes are skipped via [seen], so cycles are handled
- * safely.
- *
- * @return the IDs of *newly* inserted nodes (for animation).
- */
-async function refreshSubtree(
-  rootId: string,
-  depth = 0,
-  seen = new Set<string>()
-): Promise<string[]> {
-  if (seen.has(rootId)) return []
-  seen.add(rootId)
-
-  const sessionInfo = sessions.value.find(s => s.sessionId === rootId)
-    ?? await fetchSessionInfo(rootId)
-  if (!sessionInfo) return []
-
-  const newIds: string[] = []
-  const existingIdx = treeNodes.value.findIndex(n => n.sessionId === rootId)
-  if (existingIdx >= 0) {
-    const existing = treeNodes.value[existingIdx]
-    if (existing.status !== sessionInfo.status ||
-        existing.sessionName !== sessionInfo.sessionName ||
-        existing.depth !== depth) {
-      treeNodes.value[existingIdx] = {
-        ...existing,
-        sessionName: sessionInfo.sessionName,
-        status: sessionInfo.status,
-        depth
-      }
-    }
-  } else {
-    treeNodes.value.push({
-      sessionId: sessionInfo.sessionId,
-      sessionName: sessionInfo.sessionName,
-      status: sessionInfo.status,
-      depth
-    })
-    newIds.push(sessionInfo.sessionId)
-  }
-
-  // Always (re-)fetch children so we detect newly-spawned sub-agents.
-  let children: AgentSession[] = []
-  try {
-    const { data } = await agentApi.listChildren(rootId)
-    children = data.children || []
-  } catch (e) {
-    console.warn(`Tree refresh: failed to list children of ${shortId(rootId)}:`, e)
-    return newIds
-  }
-
-  // Build a set of edges we already have under this parent so we don't
-  // re-push duplicates across ticks.
-  const existingChildrenOfRoot = new Set(
-    treeEdges.value.filter(e => e.from === rootId).map(e => e.to)
-  )
-
-  for (const child of children) {
-    if (!existingChildrenOfRoot.has(child.sessionId)) {
-      treeEdges.value.push({
-        key: `${rootId}->${child.sessionId}`,
-        from: rootId,
-        to: child.sessionId
-      })
-    }
-    const childNew = await refreshSubtree(child.sessionId, depth + 1, seen)
-    newIds.push(...childNew)
-  }
-
-  return newIds
-}
-
-async function fetchSessionInfo(id: string): Promise<AgentSession | null> {
-  // We don't know this node's parent (if any). Fall back to a global
-  // list which is capped at 200 entries — covers the vast majority of
-  // debugging cases.
-  try {
-    const { data } = await agentApi.listSessions(200, 0, 'ALL')
-    return (data.sessions || []).find(s => s.sessionId === id) || null
-  } catch {
-    return null
-  }
-}
-
-// ---- Polling -------------------------------------------------------------
-
-/** Whether polling is currently active for the open tree modal. */
-let treePollInterval: number | null = null
-const TREE_POLL_INTERVAL_MS = 2000
-
-function isTerminalStatus(s: string | null | undefined): boolean {
-  // `closed` (run completed, cancelled, etc.) and `error` are the
-  // only terminal states under the unified enum. Legacy strings
-  // (completed / cancelled / failed) are accepted for tolerance
-  // during the migration window and treated as their new
-  // equivalents.
-  if (s == null) return false
-  return s === 'closed' || s === 'error' ||
-      s === 'completed' || s === 'cancelled' || s === 'failed'
-}
-
-function stopTreePolling() {
-  if (treePollInterval != null) {
-    clearInterval(treePollInterval)
-    treePollInterval = null
-  }
-}
-
-async function tickTree(): Promise<void> {
-  if (!treeRoot.value) return
-  // Stop polling if the root reached a terminal state — nothing more
-  // can be added below it. (Children may still mutate but that's rare
-  // in practice; the user can reopen to refresh.)
-  if (isTerminalStatus(treeRoot.value.status)) {
-    stopTreePolling()
-    return
-  }
-  try {
-    const beforeIds = new Set(treeNodes.value.map(n => n.sessionId))
-    const newIds = await refreshSubtree(treeRoot.value.sessionId)
-    if (newIds.length > 0) {
-      // Pulse the new nodes briefly
-      const next = new Set(newlyAddedNodeIds.value)
-      for (const id of newIds) {
-        if (!beforeIds.has(id)) next.add(id)
-      }
-      newlyAddedNodeIds.value = next
-      window.setTimeout(() => {
-        const cur = new Set(newlyAddedNodeIds.value)
-        let changed = false
-        for (const id of newIds) {
-          if (cur.delete(id)) changed = true
-        }
-        if (changed) newlyAddedNodeIds.value = cur
-      }, 2400)
-    }
-  } catch (e) {
-    console.warn('Tree refresh tick failed:', e)
-  }
-}
-
-function startTreePolling() {
-  stopTreePolling()
-  treePollInterval = window.setInterval(tickTree, TREE_POLL_INTERVAL_MS)
-}
-
-// ---- Live child-count badge (works even with the modal closed) -----------
-
-async function refreshLiveChildCount(): Promise<void> {
-  if (!activeSessionId.value) {
-    liveChildCount.value = 0
-    return
-  }
-  try {
-    const { data } = await agentApi.listChildren(activeSessionId.value)
-    liveChildCount.value = data.children?.length ?? 0
-  } catch {
-    /* ignore */
-  }
-}
-
-function startChildCountPolling() {
-  if (childCountInterval != null) clearInterval(childCountInterval)
-  childCountInterval = window.setInterval(refreshLiveChildCount, 3000)
-}
-
-function stopChildCountPolling() {
-  if (childCountInterval != null) {
-    clearInterval(childCountInterval)
-    childCountInterval = null
-  }
-}
-
-// ---- Modal open/close ----------------------------------------------------
-
-async function openTreeView() {
-  if (!activeSessionId.value) return
-  treeOpen.value = true
-  treeLoading.value = true
-  treeNodes.value = []
-  treeEdges.value = []
-  newlyAddedNodeIds.value = new Set()
-  treeRoot.value = sessions.value.find(s => s.sessionId === activeSessionId.value) || null
-  try {
-    await refreshSubtree(activeSessionId.value)
-    startTreePolling()
-  } catch (e) {
-    console.error('Failed to load sub-agent tree:', e)
-  } finally {
-    treeLoading.value = false
-    await nextTick()
-  }
-}
-
-function closeTreeView() {
-  treeOpen.value = false
-  stopTreePolling()
-}
 
 async function openChildSession(sessionId: string) {
-  // Switch active session without leaving the tree; reuse selectSession.
-  treeOpen.value = false
-  stopTreePolling()
+  // The "Open child session transcript" button on a sub-agent tool
+  // message simply switches the active session. (Previously this also
+  // closed the dedicated tree modal; that modal no longer exists.)
   await selectSession(sessionId)
 }
 
@@ -1641,7 +1991,7 @@ async function openChildSession(sessionId: string) {
 // ============================================================
 
 const activeSessionMeta = computed<AgentSession | undefined>(() =>
-  sessions.value.find(s => s.sessionId === activeSessionId.value)
+  findSessionById(activeSessionId.value)
 )
 
 const activeSessionName = computed(() => {
@@ -1650,23 +2000,176 @@ const activeSessionName = computed(() => {
   return meta.sessionName || 'Untitled'
 })
 
-// Refresh the child count + start polling whenever the user switches
-// sessions. Always refresh once immediately so the badge is accurate.
-watch(activeSessionId, async (id) => {
-  if (!id) {
-    liveChildCount.value = 0
-    stopChildCountPolling()
+/**
+ * The error message to display in the chat-header error banner.
+ *
+ * Implementation: a **sticky ref** updated by a watcher, NOT a
+ * computed.  Using a computed caused the banner to flicker on every
+ * status poll — the two pollers (`refreshActiveStatus` at 3s and
+ * `refreshAllStatuses` at a slower cadence) each replace
+ * `sessions.value`, which re-evaluates `activeSessionMeta`, which
+ * re-evaluates the computed.  If one poll's merged session object
+ * momentarily lacks `errorMessage` (e.g. the backend omits null
+ * fields from JSON, or a network hiccup returns stale data), the
+ * computed briefly returns `''`, the `v-if` unmounts the banner,
+ * and the next poll re-mounts it — a visible flash every few
+ * seconds.
+ *
+ * The watcher fixes this by only **clearing** the message when the
+ * session genuinely transitions out of error state or the user
+ * switches sessions.  Transient empty polls do NOT clear it.
+ */
+const dismissedErrorSession = ref<string | null>(null)
+const activeSessionErrorMessage = ref('')
+
+watch(
+  [activeSessionMeta, dismissedErrorSession],
+  ([meta, dismissed]) => {
+    if (!meta) {
+      activeSessionErrorMessage.value = ''
+      return
+    }
+    const s = (meta.status ?? '').toLowerCase()
+    const isError = s === 'error' || s === 'failed'
+    if (!isError) {
+      // Session is no longer in an error state — clear.
+      activeSessionErrorMessage.value = ''
+      return
+    }
+    if (dismissed === meta.sessionId) {
+      activeSessionErrorMessage.value = ''
+      return
+    }
+    // Only SET the message when we actually have one; a transient
+    // empty poll does NOT clear the last known error.
+    const msg = meta.errorMessage?.trim() || meta.closingReason?.trim() || ''
+    if (msg) {
+      activeSessionErrorMessage.value = msg
+    }
+  },
+  { immediate: true },
+)
+
+// ---- Conversation panel (mailbox threads) -----------------------------------
+//
+// The right-side panel is a real-time window into the agent's
+// mailbox: it lists every conversation the active session is a
+// participant in, and lets the user expand one to see the full
+// message history.  The panel polls the backend on a slow cadence
+// (CONV_POLL_MS) so the list stays current while the user is
+// reading it, and stops when the panel is collapsed or the active
+// session changes.
+
+const convPanelOpen = ref(false)
+const conversations = ref<ConversationSummary[]>([])
+const convExpandedId = ref<number | null>(null)
+const convMessages = ref<ConversationMessage[]>([])
+const convLoading = ref(false)
+const convError = ref('')
+const convMsgLoading = ref(false)
+
+let convPollInterval: number | null = null
+const CONV_POLL_MS = 5000
+
+function toggleConvPanel() {
+  convPanelOpen.value = !convPanelOpen.value
+  if (convPanelOpen.value) {
+    refreshConversations()
+    startConvPolling()
+  } else {
+    stopConvPolling()
+  }
+}
+
+async function refreshConversations() {
+  if (!activeSessionId.value) return
+  // Skip if a refresh is already in-flight to avoid piling up
+  // requests when the network is slow.
+  if (convLoading.value) return
+  convLoading.value = true
+  convError.value = ''
+  try {
+    const { data } = await agentApi.listConversations(activeSessionId.value, 'all')
+    conversations.value = data.conversations || []
+  } catch (e: any) {
+    convError.value = e?.response?.data?.error || e?.message || 'Failed to load conversations'
+  } finally {
+    convLoading.value = false
+  }
+}
+
+function startConvPolling() {
+  if (convPollInterval != null) return
+  // Always run an immediate tick on (re)start so the panel does
+  // not appear stale for `CONV_POLL_MS` after the user opens it.
+  refreshConversations()
+  convPollInterval = window.setInterval(refreshConversations, CONV_POLL_MS)
+}
+
+function stopConvPolling() {
+  if (convPollInterval != null) {
+    clearInterval(convPollInterval)
+    convPollInterval = null
+  }
+}
+
+async function toggleConvExpand(conversationId: number) {
+  if (convExpandedId.value === conversationId) {
+    // Collapse: clear the cached messages so the next expand
+    // does not briefly flash stale data.
+    convExpandedId.value = null
+    convMessages.value = []
     return
   }
-  await refreshLiveChildCount()
-  startChildCountPolling()
+  convExpandedId.value = conversationId
+  convMessages.value = []
+  convMsgLoading.value = true
+  try {
+    const { data } = await agentApi.getConversation(activeSessionId.value!, conversationId)
+    convMessages.value = data.messages || []
+  } catch (e: any) {
+    convError.value = e?.response?.data?.error || e?.message || 'Failed to load messages'
+    convMessages.value = []
+  } finally {
+    convMsgLoading.value = false
+  }
+}
+
+// Reset conversation panel state on session switch so stale data
+// from the previous session doesn't linger. The earlier onUnmounted
+// (declared further up) already stops the status and list polls;
+// we don't start any tree / child-count polls here because those
+// features were removed in favour of the inline session list.
+watch(activeSessionId, async (id) => {
+  if (!id) {
+    // The user just deleted the active session; the per-session
+    // status poll started by selectSession() is now stale and
+    // would 404 forever — stop it explicitly.
+    stopStatusPolling()
+    // Reset the conversation panel for the new session.
+    stopConvPolling()
+    conversations.value = []
+    convExpandedId.value = null
+    convMessages.value = []
+    return
+  }
+  // Reset conversation panel state on session switch so stale
+  // data from the previous session doesn't linger.
+  conversations.value = []
+  convExpandedId.value = null
+  convMessages.value = []
+  if (convPanelOpen.value) {
+    refreshConversations()
+    startConvPolling()
+  }
 }, { immediate: false })
 
-// Stop polling if the component unmounts (route change).
+// Stop polling if the component unmounts (route change). The earlier
+// onUnmounted() already stops the status and list polls; this second
+// declaration only handles the conversation cleanup, so the
+// duplicate is fine — Vue merges both hooks.
 onUnmounted(() => {
-  stopTreePolling()
-  stopChildCountPolling()
-  if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
+  stopConvPolling()
 })
 </script>
 
@@ -1678,15 +2181,205 @@ onUnmounted(() => {
   min-height: 480px;
 }
 
+/* ---- Session list (left-side collapsible) ----
+   Layout: a flex row whose collapsed state is just the 36px-wide
+   `session-list-toggle` button on the right edge, and whose expanded
+   state adds a 244px-wide content area on the left. Mirrors the
+   right-side `.conv-panel` for visual symmetry. The 36px handle
+   always shows the current session count as a badge so the user can
+   see "there's stuff to look at" even when collapsed. */
 .session-list {
-  width: 280px;
+  display: flex;
+  flex-direction: row;
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  padding: 16px;
-  overflow-y: auto;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  width: 36px;
+}
+.session-list-open {
+  width: 280px;
+}
+.session-list-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  padding: 16px;
+  /* No overflow here.  We push overflow onto a child
+     `.session-list-scroll` so the hover card pinned at the
+     bottom of this flex column can never be clipped, and its
+     width stays aligned with the panel's inner padding. */
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+  Scroll container that holds the actual list of sessions.
+  `min-height: 0` is required for a flex child to be allowed to
+  shrink below its content size — otherwise the parent flex
+  column would not constrain the scroll and the list would push
+  the hover card off-screen.
+*/
+.session-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Give the list a little breathing room at the bottom so the
+     last row is not flush against the hover card when both are
+     visible. */
+  padding-bottom: 4px;
+}
+
+/*
+  Sticky hover card.  Pinned to the bottom of the flex column
+  inside `.session-list-content`, so its width is automatically
+  bound by the panel's inner padding (no overflow, no
+  misalignment).  The card has its own subtle background and a
+  top border so the user can tell where the list ends and the
+  detail panel begins.
+
+  Inside the card, info is laid out vertically:
+    [ status-row ............ ]
+    [ 🧩 sub-agent  module   ]
+    [ 12:34:56              ]
+
+  Wrapping inside the card is allowed, so even if a tag name is
+  long, the card grows downward instead of overflowing the
+  panel.
+*/
+.session-hover-card {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f8f9fb;
+  border: 1px solid #e8eaee;
+  border-radius: 6px;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  /* Tint the card's left rail to match the session's state,
+     echoing the same palette as the row's border. */
+  border-left-width: 3px;
+}
+.session-hover-card .hover-card-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: #555;
+  min-width: 0;
+}
+.session-hover-card .hover-card-time {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+.session-hover-card .hover-card-uuid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #666;
+  /* Wrap long UUIDs to multiple lines instead of overflowing the
+     ~244px card width.  `word-break: break-all` makes sure a long
+     hex string still wraps cleanly. */
+  word-break: break-all;
+}
+.session-hover-card .hover-card-uuid-label {
+  flex-shrink: 0;
+  color: #888;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.session-hover-card .hover-card-uuid-value {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #444;
+  background: #fff;
+  border: 1px solid #e0e2e6;
+  border-radius: 3px;
+  padding: 1px 4px;
+  /* Allow the long UUID to wrap inside the bordered chip rather
+     than escape the card's width. */
+  word-break: break-all;
+  cursor: text;
+  user-select: all;
+}
+.session-hover-card .subagent-tag {
+  color: #5e35b1;
+  background: #ede7f6;
+  font-size: 10px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-weight: 500;
+}
+.session-hover-card .module-tag {
+  color: #455a64;
+  background: #eceff1;
+  font-size: 10px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-weight: 500;
+}
+
+/* State-coloured left rail.  Matches the palette used on
+   `.session-tree-item` rows so the user can visually associate
+   the row with its hover card at a glance. */
+.session-hover-card.status-running    { border-left-color: #1976d2; }
+.session-hover-card.status-msghandle  { border-left-color: #7b1fa2; }
+.session-hover-card.status-standby    { border-left-color: #9e9e9e; }
+.session-hover-card.status-cancelling { border-left-color: #ff9800; }
+.session-hover-card.status-closed     { border-left-color: #4caf50; }
+.session-hover-card.status-completed  { border-left-color: #4caf50; }
+.session-hover-card.status-cancelled  { border-left-color: #fbc02d; }
+.session-hover-card.status-failed     { border-left-color: #f44336; }
+.session-hover-card.status-error      { border-left-color: #f44336; }
+.session-hover-card.status-unknown    { border-left-color: #d0d0d0; }
+.session-list-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 36px;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  border-left: 1px solid #e8e8e8;
+  cursor: pointer;
+  flex-shrink: 0;
+  color: #555;
+  font-size: 12px;
+}
+.session-list-toggle:hover {
+  background: #eef5ff;
+}
+.session-list-toggle-icon {
+  font-size: 10px;
+  color: #999;
+}
+.session-list-toggle-label {
+  position: relative;
+  font-size: 15px;
+}
+.session-list-count {
+  position: absolute;
+  top: -4px;
+  right: -10px;
+  background: #e94560;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 5px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.2;
 }
 
 .session-header {
@@ -1798,14 +2491,412 @@ onUnmounted(() => {
 .status.error,
 .status.failed { background: #ffebee; color: #d32f2f; }
 
+/* ---------------------------------------------------------------
+   `status-row` — session-list badge with a leading pulse dot for
+   non-terminal states.  Slightly larger and more saturated than
+   the legacy `.status` pill so a glance at the list tells the
+   user "this session is doing something right now".
+   --------------------------------------------------------------- */
+.status-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9px;
+  background: #f0f0f0;
+  color: #555;
+  line-height: 1;
+  letter-spacing: 0.2px;
+}
+.status-row .status-row-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: statusRowPulse 1.4s ease-in-out infinite;
+}
+@keyframes statusRowPulse {
+  0%, 100% { opacity: 0.45; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: 1;    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.18); }
+}
+.status-row.status-row-active {
+  background: #e3f2fd;
+  color: #1976d2;
+  box-shadow: 0 0 0 1px rgba(25, 118, 210, 0.18);
+}
+.status-row.closed,
+.status-row.completed {
+  background: #e8f5e9;
+  color: #2e7d32;
+  box-shadow: none;
+}
+.status-row.cancelled {
+  background: #f5f5f5;
+  color: #777;
+  box-shadow: none;
+}
+.status-row.error,
+.status-row.failed {
+  background: #ffebee;
+  color: #c62828;
+  box-shadow: none;
+}
+.status-row.cancelling {
+  background: #fff3e0;
+  color: #e65100;
+}
+.status-row.msghandle {
+  background: #ede7f6;
+  color: #5e35b1;
+}
+
+/* ---------------------------------------------------------------
+   `status-pill` — the prominent badge in the chat header.
+   Larger, stronger colours, and an animated dot for non-terminal
+   states.  The pill is the single most glanceable indicator of
+   "what is my agent doing right now?" and stays in sync with the
+   backend via the 3-second status poll.
+   --------------------------------------------------------------- */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #f0f0f0;
+  color: #555;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  user-select: none;
+}
+.status-pill .status-pill-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: statusPillPulse 1.4s ease-in-out infinite;
+}
+.status-pill .status-pill-label {
+  display: inline-block;
+}
+@keyframes statusPillPulse {
+  0%, 100% { opacity: 0.5; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: 1;   box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.22); }
+}
+/* Non-terminal (running/standby/msghandle/cancelling/active) —
+   the live states where the user wants visual confirmation. */
+.status-pill.status-pill-non-terminal {
+  background: #e3f2fd;
+  color: #1565c0;
+  box-shadow: 0 1px 3px rgba(25, 118, 210, 0.25);
+}
+.status-pill.status-pill-standby {
+  /* STANDBY gets its own distinct colour so a parked agent
+     reads differently from one that is actively running. */
+  background: #e0f2f1;
+  color: #00695c;
+  box-shadow: 0 1px 3px rgba(0, 150, 136, 0.25);
+}
+.status-pill.status-pill-standby .status-pill-dot {
+  /* Slower pulse for standby — parked, not racing. */
+  animation: statusPillPulseSlow 2.4s ease-in-out infinite;
+}
+@keyframes statusPillPulseSlow {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: 0.95; box-shadow: 0 0 0 3px rgba(0, 150, 136, 0.22); }
+}
+.status-pill.status-pill-cancelling {
+  background: #fff3e0;
+  color: #e65100;
+  box-shadow: 0 1px 3px rgba(230, 81, 0, 0.25);
+}
+.status-pill.status-pill-msghandle {
+  background: #ede7f6;
+  color: #4527a0;
+  box-shadow: 0 1px 3px rgba(94, 53, 177, 0.25);
+}
+.status-pill.status-pill-terminal {
+  /* Completed / closed — soft green, terminal. */
+  background: #e8f5e9;
+  color: #2e7d32;
+  box-shadow: 0 1px 3px rgba(46, 125, 50, 0.15);
+}
+.status-pill.status-pill-terminal .status-pill-dot {
+  /* No animation on terminal states. */
+  animation: none;
+  opacity: 1;
+}
+.status-pill.status-pill-cancelled {
+  background: #f5f5f5;
+  color: #777;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.status-pill.status-pill-cancelled .status-pill-dot { animation: none; opacity: 0.6; }
+.status-pill.status-pill-error,
+.status-pill.status-pill-failed {
+  background: #ffebee;
+  color: #c62828;
+  box-shadow: 0 1px 3px rgba(198, 40, 40, 0.25);
+}
+.status-pill.status-pill-error .status-pill-dot,
+.status-pill.status-pill-failed .status-pill-dot { animation: none; opacity: 1; }
+
 .chat {
   flex: 1;
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+/* The main chat column — header + messages + composer. Takes all */
+/* available space; the conversation panel steals space from the  */
+/* right when open.                                                */
+.chat-body {
+  flex: 1;
+  display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
+}
+
+/* ---- Conversation panel (right-side collapsible) ---- */
+.conv-panel {
+  display: flex;
+  flex-direction: row;
+  border-left: 1px solid #e0e0e0;
+  background: #fafcff;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  width: 36px;
+}
+.conv-panel-open {
+  width: 340px;
+}
+.conv-panel-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 36px;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  color: #555;
+  font-size: 12px;
+}
+.conv-panel-toggle:hover {
+  background: #eef5ff;
+}
+.conv-panel-toggle-icon {
+  font-size: 10px;
+  color: #999;
+}
+.conv-panel-toggle-label {
+  position: relative;
+  font-size: 15px;
+}
+.conv-panel-count {
+  position: absolute;
+  top: -4px;
+  right: -10px;
+  background: #e94560;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 5px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.2;
+}
+.conv-panel-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid #e8e8e8;
+}
+.conv-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+.conv-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+.conv-panel-refresh {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  color: #666;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.conv-panel-refresh:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+.conv-panel-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.conv-panel-error {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #c62828;
+}
+.conv-panel-empty {
+  padding: 20px 14px;
+  text-align: center;
+}
+.conv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.conv-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.conv-item:hover {
+  background: #f5f9ff;
+}
+.conv-item-active {
+  background: #eef5ff;
+}
+.conv-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.conv-item-id {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1976d2;
+}
+.conv-item-badge {
+  background: #e94560;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 6px;
+  min-width: 16px;
+  text-align: center;
+}
+.conv-item-count {
+  font-size: 10px;
+  color: #999;
+  margin-left: auto;
+}
+.conv-item-kind {
+  font-size: 9px;
+  background: #e0e0e0;
+  color: #555;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.conv-item-preview {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-item-time {
+  font-size: 9px;
+  color: #aaa;
+  margin-top: 2px;
+}
+.conv-messages {
+  margin-top: 8px;
+  border-top: 1px dashed #ddd;
+  padding-top: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.conv-msg {
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font-size: 11px;
+}
+.conv-msg-out {
+  background: #e3f2fd;
+}
+.conv-msg-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.conv-msg-kind {
+  font-size: 9px;
+  font-weight: 600;
+  color: #1976d2;
+  text-transform: uppercase;
+}
+.conv-msg-from {
+  font-size: 10px;
+  color: #888;
+  font-family: monospace;
+}
+.conv-msg-acked {
+  color: #43a047;
+  font-size: 10px;
+  margin-left: auto;
+}
+.conv-msg-subject {
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 2px;
+}
+.conv-msg-body {
+  font-size: 11px;
+  color: #444;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+.conv-msg-time {
+  font-size: 9px;
+  color: #aaa;
+  margin-top: 2px;
 }
 
 .empty-state {
@@ -1830,6 +2921,80 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 6px;
   max-width: 80%;
+}
+
+/* Wake-event separator: a full-width divider with a centered label */
+/* showing who triggered the agent's wake from standby.  Rendered   */
+/* instead of a normal chat bubble when the message content starts  */
+/* with `[[AKIBA_WAKE_EVENT]]`.                                       */
+.wake-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  margin: 8px 0;
+}
+.wake-separator-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #c8e6c9 20%,
+    #81c784 50%,
+    #c8e6c9 80%,
+    transparent
+  );
+}
+.wake-separator-label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(46, 125, 50, 0.12);
+}
+.wake-separator-icon {
+  font-size: 13px;
+}
+
+/* Wake segment selector dropdown in the chat header.
+   Only visible when the session has 2+ wake events. */
+.wake-selector {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid #a5d6a7;
+  border-radius: 16px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  cursor: pointer;
+  outline: none;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wake-selector:hover {
+  border-color: #66bb6a;
+  background: #d7ecd9;
+}
+.wake-selector:focus {
+  border-color: #43a047;
+  box-shadow: 0 0 0 2px rgba(67, 160, 71, 0.15);
+}
+.wake-selector option {
+  font-size: 12px;
+  padding: 4px;
+  color: #333;
+  background: #fff;
 }
 
 .msg.user {
@@ -1913,21 +3078,59 @@ onUnmounted(() => {
 .tool-call.status-error summary   { color: #c62828; }
 .tool-call summary:hover { background: rgba(0,0,0,0.03); }
 
-/* Two-column tool detail layout */
+/* Tool detail layout: stacked vertically (parameters on top, output
+   below). Parameters live inside a nested <details> element so the
+   user can independently collapse them when they only care about the
+   result. The output section is always visible (no extra collapse
+   control). */
 .tool-detail {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   border-top: 1px solid #e0e0e0;
-  min-height: 40px;
+}
+.tool-params-block {
+  /* No border-bottom: the output section below provides the divider
+     via its own `border-top`. */
+}
+.tool-params-block > summary {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 10px 4px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;            /* hide the default disclosure triangle */
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tool-params-block > summary::-webkit-details-marker {
+  display: none;               /* WebKit / Chromium */
+}
+.tool-params-block > summary::marker {
+  content: '';                 /* Firefox */
+}
+.tool-params-block > summary::before {
+  content: '▾';
+  font-size: 9px;
+  color: #aaa;
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+.tool-params-block:not([open]) > summary::before {
+  content: '▸';
+}
+.tool-params-block > summary:hover {
+  color: #555;
 }
 .tool-section {
-  flex: 1;
-  width: 50%;
+  width: 100%;
   min-width: 0;
 }
-.tool-section + .tool-section {
-  border-top: none;
-  border-left: 1px solid #eee;
+.tool-output-section {
+  border-top: 1px solid #f0f0f0;
 }
 .tool-label {
   font-size: 10px;
@@ -1935,7 +3138,7 @@ onUnmounted(() => {
   color: #888;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 5px 10px 0;
+  padding: 6px 10px 4px;
 }
 .tool-args-text, .tool-result-text {
   margin: 0;
@@ -2022,6 +3225,54 @@ onUnmounted(() => {
   padding: 10px 16px;
   font-size: 13px;
   border-top: 1px solid #ffcdd2;
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* Agent error banner — shown in the chat area when the active
+   session is in an `error` state. Distinct from `.error-banner`
+   (which is for client-side / HTTP errors) so the two can be
+   styled independently. */
+.agent-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff3f3;
+  color: #c62828;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-top: 1px solid #ffcdd2;
+  border-bottom: 1px solid #ffcdd2;
+}
+.agent-error-banner .agent-error-icon {
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.agent-error-banner .agent-error-text {
+  flex: 1;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-weight: 700;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.agent-error-banner .agent-error-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #c62828;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0.6;
+}
+.agent-error-banner .agent-error-dismiss:hover {
+  opacity: 1;
 }
 
 /* LLM selector + composer */
@@ -2242,7 +3493,7 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-/* ---- Chat header / tree button ------------------------------------------ */
+/* ---- Chat header --------------------------------------------------------- */
 .chat-header {
   display: flex;
   align-items: center;
@@ -2380,205 +3631,6 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
   font-size: 10px;
   color: #888;
-}
-
-/* ---- Tree modal --------------------------------------------------------- */
-.tree-modal {
-  width: min(1100px, 95vw);
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
-.tree-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.tree-modal-header h2 { margin: 0; font-size: 20px; }
-.tree-modal-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-
-/* Zoom control cluster. Buttons stay tightly grouped but separate from
-   the export / close actions on the right edge. */
-.tree-zoom-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
-  background: #f5f5f5;
-  border-radius: 6px;
-}
-.tree-zoom-btn { padding: 4px 10px !important; font-size: 13px !important; min-width: 32px; }
-.tree-zoom-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.tree-live-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: #388e3c;
-  background: #e8f5e9;
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-}
-.tree-live-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #43a047;
-  animation: treeLivePulse 1.5s infinite;
-}
-@keyframes treeLivePulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
-/* The tree grows horizontally so the container scrolls on both axes by
-   default. The inner `.tree-svg-wrap` is what we actually scale and pan;
-   keeping it inside the scrollable container means the browser handles
-   scrollbar behavior correctly when the user zooms in. */
-.tree-container {
-  border: 1px solid #eee;
-  border-radius: 8px;
-  background: #fafcff;
-  padding: 0;
-  overflow: auto;
-  flex: 1;
-  min-height: 360px;
-  max-height: 65vh;
-  position: relative;
-  cursor: grab;
-}
-.tree-container:active { cursor: grabbing; }
-
-.tree-svg-wrap {
-  /* Sized by inline `transform`. Using `position: relative` ensures the
-     transform-origin behaves predictably across browsers. */
-  position: relative;
-  transform-origin: 0 0;
-  /* Smooth transition for zoom buttons; disabled during pan/zoomFit to
-     avoid jank. */
-  transition: transform 0.15s ease-out;
-  will-change: transform;
-}
-.tree-svg {
-  display: block;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.tree-node { cursor: pointer; }
-.tree-node-rect {
-  fill: #ffffff;
-  stroke: #90caf9;
-  stroke-width: 1.5;
-  transition: fill 0.15s, stroke 0.15s;
-}
-.tree-node:hover .tree-node-rect {
-  fill: #fff5f7;
-  stroke: #e94560;
-}
-.tree-node-rect-active {
-  fill: #ffe4ec !important;
-  stroke: #e94560 !important;
-  stroke-width: 2 !important;
-}
-.tree-node-rect-subagent {
-  fill: #f3f9ff;
-  stroke: #64b5f6;
-}
-.tree-node-rect-running {
-  stroke-dasharray: 4 3;
-  animation: treeNodeDash 1.2s linear infinite;
-}
-@keyframes treeNodeDash {
-  to { stroke-dashoffset: -14; }
-}
-
-/* Pulse animation for newly-arrived nodes */
-.tree-node-new .tree-node-rect {
-  animation: treeNodeNewPulse 2s ease-out 1;
-}
-@keyframes treeNodeNewPulse {
-  0%   { fill: #c8e6c9; stroke: #43a047; stroke-width: 3; }
-  60%  { fill: #c8e6c9; stroke: #43a047; stroke-width: 2; }
-  100% { fill: #ffffff; stroke: #90caf9; stroke-width: 1.5; }
-}
-
-.tree-node-name {
-  font-size: 11px;
-  font-weight: 600;
-  fill: #222;
-  pointer-events: none;
-}
-.tree-node-meta {
-  font-size: 9px;
-  fill: #888;
-  pointer-events: none;
-}
-.tree-node-id {
-  font-size: 9px;
-  fill: #888;
-  font-family: 'Courier New', monospace;
-  pointer-events: none;
-}
-.tree-node-arrow {
-  font-size: 10px;
-  fill: #90caf9;
-  pointer-events: none;
-}
-
-.tree-edge {
-  fill: none;
-  stroke: #bbdefb;
-  stroke-width: 1.5;
-  transition: stroke 0.4s, stroke-width 0.4s;
-}
-.tree-edge-active { stroke: #e94560; }
-
-/* "+N more" pill for collapsed parents. Drawn as a small pill on the
-   right edge of the parent node. Clicking it expands the hidden
-   siblings. */
-.tree-collapse-marker { cursor: pointer; }
-.tree-collapse-rect {
-  fill: #fff5f7;
-  stroke: #e94560;
-  stroke-width: 1.5;
-  transition: fill 0.15s, stroke 0.15s;
-}
-.tree-collapse-marker:hover .tree-collapse-rect {
-  fill: #e94560;
-  stroke: #c62828;
-}
-.tree-collapse-marker:hover .tree-collapse-text { fill: #fff; }
-.tree-collapse-text {
-  fill: #e94560;
-  font-size: 11px;
-  font-weight: 600;
-  user-select: none;
-}
-
-.tree-legend {
-  margin-top: 8px;
-  text-align: center;
-}
-
-/* ---- Tree button live child-count badge --------------------------------- */
-.tree-badge {
-  display: inline-block;
-  min-width: 18px;
-  padding: 1px 6px;
-  margin-left: 4px;
-  background: #1976d2;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.4;
-  border-radius: 9px;
-  text-align: center;
-  vertical-align: middle;
 }
 </style>
 
