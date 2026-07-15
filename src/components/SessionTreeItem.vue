@@ -146,7 +146,7 @@
       </div>
 
       <button
-        v-if="showDelete"
+        v-if="showDelete && !session.parentSessionId"
         class="del"
         title="Delete"
         @click.stop="onDelete"
@@ -156,15 +156,23 @@
     <!--
       Recursive children.  Only render the inner `<ul>` when this
       session is expanded AND we know it has at least one child.
-      Vue's stable v-for key (sessionId) keeps each child's local
-      state across re-renders.
+
+      Children are split into two groups:
+        1. "active" children (non-terminal status) — always visible
+           when the parent is expanded.
+        2. "closed" children (terminal status) — collapsed by default
+           behind a summary row like "▾ 3 closed agents".  Clicking
+           the summary toggles their visibility.
+
+      This prevents a parent that spawned many short-lived sub-agents
+      from flooding the list with dozens of closed rows.
     -->
     <ul
       v-if="expanded && childrenList.length > 0"
       class="session-children"
     >
       <SessionTreeItem
-        v-for="child in childrenList"
+        v-for="child in activeChildren"
         :key="child.sessionId"
         :session="child"
         :depth="depth + 1"
@@ -181,12 +189,70 @@
         @leave="(s) => $emit('leave', s)"
         @context="(e, id, name) => $emit('context', e, id, name)"
       />
+
+      <!--
+        Collapsed closed-children summary row.
+        Only shown when there are closed children AND they are not
+        expanded.  Clicking toggles `showClosedChildren`.
+      -->
+      <li
+        v-if="closedChildren.length > 0 && !showClosedChildren"
+        class="session-tree-item session-closed-summary"
+      >
+        <div
+          class="session-row"
+          :style="{ paddingLeft: `${(depth + 1) * 14 + 4}px` }"
+          @click="showClosedChildren = true"
+        >
+          <span class="session-expand-icon">▸</span>
+          <span class="closed-summary-text">
+            {{ closedChildren.length }} closed agent{{ closedChildren.length > 1 ? 's' : '' }}
+          </span>
+        </div>
+      </li>
+
+      <!--
+        Expanded closed children.  Includes a header row to collapse
+        them back.
+      -->
+      <template v-if="closedChildren.length > 0 && showClosedChildren">
+        <li class="session-tree-item session-closed-header">
+          <div
+            class="session-row"
+            :style="{ paddingLeft: `${(depth + 1) * 14 + 4}px` }"
+            @click="showClosedChildren = false"
+          >
+            <span class="session-expand-icon">▾</span>
+            <span class="closed-summary-text">
+              {{ closedChildren.length }} closed agent{{ closedChildren.length > 1 ? 's' : '' }}
+            </span>
+          </div>
+        </li>
+        <SessionTreeItem
+          v-for="child in closedChildren"
+          :key="child.sessionId"
+          :session="child"
+          :depth="depth + 1"
+          :active-session-id="activeSessionId"
+          :expanded-ids="expandedIds"
+          :children-map="childrenMap"
+          :loading-ids="loadingIds"
+          :flash-nonces="flashNonces"
+          :show-delete="showDelete"
+          @select="(id) => $emit('select', id)"
+          @delete="(id) => $emit('delete', id)"
+          @toggle="(id) => $emit('toggle', id)"
+          @hover="(s) => $emit('hover', s)"
+          @leave="(s) => $emit('leave', s)"
+          @context="(e, id, name) => $emit('context', e, id, name)"
+        />
+      </template>
     </ul>
   </li>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { AgentSession } from '@/types'
 
 const props = withDefaults(defineProps<{
@@ -247,6 +313,33 @@ const childrenList = computed<AgentSession[]>(
 )
 const childrenCount = computed(() => childrenList.value.length)
 
+/**
+ * Split children into "active" (non-terminal) and "closed" (terminal)
+ * groups.  Active children are always shown when the parent is expanded;
+ * closed children are collapsed behind a summary row by default so a
+ * parent that spawned many short-lived sub-agents doesn't flood the list.
+ *
+ * The split is purely visual — both groups come from the same cached
+ * children list and no data is lost.
+ */
+function isTerminalStatus(s: string | null | undefined): boolean {
+  if (s == null) return false
+  return s === 'closed' || s === 'error' ||
+      s === 'completed' || s === 'cancelled' || s === 'failed'
+}
+
+const activeChildren = computed(() =>
+  childrenList.value.filter(c => !isTerminalStatus(c.status))
+)
+const closedChildren = computed(() =>
+  childrenList.value.filter(c => isTerminalStatus(c.status))
+)
+
+/** Toggle for the collapsed closed-children section.  Local per-item
+ *  state — resets when the component is destroyed (e.g. parent
+ *  collapsed and re-expanded). */
+const showClosedChildren = ref(false)
+
 const expandTitle = computed(() => {
   if (loading.value) return 'Loading sub-agents…'
   if (expanded.value) return 'Collapse sub-agents'
@@ -288,6 +381,7 @@ function statusLabelFor(status: string | null | undefined): string {
     case 'running': return 'Running'
     case 'standby': return 'Standby'
     case 'msghandle': return 'Handling mail'
+    case 'paused': return 'Paused'
     case 'cancelling': return 'Cancelling…'
     case 'active': return 'Active'
     case 'suspended': return 'Standby'
@@ -419,6 +513,7 @@ function onLeave() {
 */
 .status-running > .session-row    { border-left-color: #1976d2; }
 .status-msghandle > .session-row  { border-left-color: #7b1fa2; }
+.status-paused > .session-row     { border-left-color: #ff9800; }
 .status-standby > .session-row    { border-left-color: #9e9e9e; }
 .status-cancelling > .session-row { border-left-color: #ff9800; }
 .status-closed > .session-row     { border-left-color: #4caf50; }
@@ -478,6 +573,7 @@ function onLeave() {
 }
 .flash-running    { background: #1976d2; }
 .flash-msghandle  { background: #7b1fa2; }
+.flash-paused     { background: #ff9800; }
 .flash-standby    { background: #9e9e9e; }
 .flash-cancelling { background: #ff9800; }
 .flash-closed     { background: #4caf50; }
@@ -606,5 +702,44 @@ function onLeave() {
   list-style: none;
   margin: 1px 0 2px 0;
   padding: 0;
+}
+
+/* Collapsed closed-children summary / header rows.  These look like
+   thin, muted rows that invite a click to expand/collapse the group
+   of finished sub-agents. */
+.session-closed-summary,
+.session-closed-header {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.session-closed-summary > .session-row,
+.session-closed-header > .session-row {
+  cursor: pointer;
+  min-height: 22px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.session-closed-summary > .session-row:hover,
+.session-closed-header > .session-row:hover {
+  background: #f5f5f5;
+}
+.closed-summary-text {
+  font-size: 11px;
+  color: #999;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-closed-summary .session-expand-icon,
+.session-closed-header .session-expand-icon {
+  font-size: 10px;
+  color: #aaa;
+  margin-right: 4px;
+  width: 14px;
+  display: inline-block;
+  text-align: center;
+  flex-shrink: 0;
 }
 </style>

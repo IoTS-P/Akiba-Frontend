@@ -81,6 +81,7 @@ export type AgentRuntimeState =
   | 'running'
   | 'standby'
   | 'msghandle'
+  | 'paused'
   | 'cancelling'
   | 'closed'
   | 'error'
@@ -127,6 +128,33 @@ export interface AgentSession {
    * out; the tree view uses it to render the parent → child graph.
    */
   parentSessionId?: string | null
+  /**
+   * Pending human-confirmation request for this session, if any.
+   *
+   * Populated when a tool (e.g. `run_shell`) is blocked waiting for
+   * the user to approve/deny an action. The frontend detects this
+   * via the existing session status poll and shows a confirmation
+   * modal. `null`/absent when no confirmation is pending.
+   */
+  pendingConfirmation?: PendingConfirmation | null
+}
+
+/**
+ * A pending tool-confirmation request surfaced to the user.
+ *
+ * The backend [ConfirmationManager] stores this when a tool (e.g.
+ * `run_shell`) requires user approval. The frontend detects it via
+ * the `pendingConfirmation` field on `AgentSession` (populated by
+ * `GET /agent/sessions/{id}`) and shows a modal. The user responds
+ * via `POST /agent/sessions/{id}/confirmation/respond`.
+ */
+export interface PendingConfirmation {
+  requestId: string
+  toolName: string
+  command: string
+  workingDirectory: string
+  timeout: number
+  createdAt: number
 }
 
 export interface AgentMessage {

@@ -68,6 +68,11 @@ const router = createRouter({
           component: () => import('@/views/Skills.vue')
         },
         {
+          path: 'modules',
+          name: 'modules',
+          component: () => import('@/views/Modules.vue')
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/Settings.vue')

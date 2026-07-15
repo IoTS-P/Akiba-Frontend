@@ -252,6 +252,13 @@
               </div>
               <div class="form-group inline-check"><label><input type="checkbox" v-model="gui.ghidra.forkOnTask" /> Fork on Task</label></div>
             </div>
+            <!-- Base mode: continue log (required, mirrors fork's Fork To) -->
+            <div v-if="ghidraProjectSelection !== '__new__' && gui.ghidra.mode === 'base'" class="form-row">
+              <div class="form-group flex2">
+                <label>Continue Log <span class="hint">(required, default: {{ defaultContinueLogName }})</span></label>
+                <input v-model="gui.ghidra.continueLog" :placeholder="defaultContinueLogName" />
+              </div>
+            </div>
             <div class="form-row">
               <div class="form-group inline-check"><label><input type="checkbox" v-model="gui.ghidra.saveProject" /> Save Project</label></div>
               <div class="form-group inline-check"><label><input type="checkbox" v-model="gui.ghidra.noCreateProgram" /> No Create Program</label></div>
@@ -334,7 +341,15 @@
             <summary>Tasks <span class="badge">{{ gui.tasks.length }}</span></summary>
             <div v-for="(task, idx) in gui.tasks" :key="idx" class="task-item">
               <div class="form-row">
-                <div class="form-group flex2"><label>Main Class</label><input v-model="task.mainClassName" placeholder="org.iotsplab.akiba.module.AkibaUtils" /></div>
+                <div class="form-group flex2">
+                  <label>Main Class</label>
+                  <select v-model="task.mainClassName">
+                    <option value="" disabled>— select module —</option>
+                    <option v-for="opt in moduleOptionsFor(task.mainClassName)" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}<template v-if="opt.group !== 'Current'"> ({{ opt.group }})</template>
+                    </option>
+                  </select>
+                </div>
                 <div class="form-group"><label>Timeout (s) <span class="hint">(empty = no limit)</span></label><input :value="task.timeout" @input="(e: any) => { const v = e.target.value; (task as any).timeout = v === '' ? null : Number(v) }" type="number" placeholder="e.g. 600" /></div>
                 <div class="form-group"><label>Table Name</label><input v-model="task.tableName" placeholder="(auto)" /></div>
               </div>
@@ -392,14 +407,44 @@
         Select an existing configuration above or create a new one.
       </div>
     </div>
+
+    <!-- Auto-update -->
+    <div class="card">
+      <h2>Software Update</h2>
+      <p class="subtitle">Check for new Akiba releases from GitHub.</p>
+
+      <div v-if="updateStatus.updateAvailable" class="update-banner">
+        <strong>Update available!</strong>
+        Current: {{ updateStatus.currentVersion || '?' }} →
+        Latest: {{ updateStatus.latestVersion || '?' }}
+        <br />
+        <span class="hint">{{ updateStatus.stagedArtifacts.length }} artifact(s) staged. Restart the container to apply.</span>
+      </div>
+
+      <div v-else-if="updateStatus.currentVersion && updateStatus.latestVersion" class="muted small">
+        Up to date (version {{ updateStatus.currentVersion }}).
+      </div>
+
+      <div v-if="updateStatus.error" class="error-text small">{{ updateStatus.error }}</div>
+
+      <div class="actions">
+        <button class="btn-primary" @click="checkForUpdates" :disabled="checkingUpdates">
+          {{ checkingUpdates ? 'Checking…' : 'Check for Updates' }}
+        </button>
+      </div>
+
+      <div v-if="updateStatus.lastCheck" class="muted small">
+        Last checked: {{ updateStatus.lastCheck }}
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { llmConfigApi, runtimeConfigApi, projectApi } from '@/services/api'
+import { llmConfigApi, runtimeConfigApi, projectApi, updateApi, moduleApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry } from '@/services/api'
+import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry, ModuleEntry } from '@/services/api'
 
 const authStore = useAuthStore()
 
@@ -646,6 +691,22 @@ const defaultForkName = computed(() => {
   return `${prefix}${n}`
 })
 
+// Compute default continue-log name for base mode: `<projectName>-<N>`
+// where N is the smallest positive integer such that no project with
+// that name already exists on disk.  Mirrors defaultForkName so the
+// required continue-log field always has a sensible, collision-free
+// default the moment the user picks `base`.
+const defaultContinueLogName = computed(() => {
+  if (ghidraProjectSelection.value === NEW_PROJECT_SENTINEL) return ''
+  const original = ghidraProjectSelection.value
+  const prefix = `${original}-`
+  let n = 1
+  while (ghidraProjectOptions.value.some(p => p.name === `${prefix}${n}`)) {
+    n++
+  }
+  return `${prefix}${n}`
+})
+
 /**
  * Whenever the user changes the Project Name dropdown, reset dependent
  * fields so the form stays internally consistent:
@@ -662,6 +723,7 @@ function onGhidraProjectSelectionChange() {
     gui.ghidra.mode = 'new'
     gui.ghidra.name = defaultNewProjectName.value
     gui.ghidra.forkTo = ''
+    gui.ghidra.continueLog = ''
   } else {
     // Treat the selection as the source project.
     gui.ghidra.name = ghidraProjectSelection.value
@@ -670,6 +732,14 @@ function onGhidraProjectSelectionChange() {
       gui.ghidra.mode = 'base'
     }
     gui.ghidra.forkTo = ''
+    // Continue-log is required in base mode; pre-fill it with a fresh
+    // default based on the newly selected project so the field is
+    // never empty.  In fork mode it's not used, so clear it.
+    if (gui.ghidra.mode === 'base') {
+      gui.ghidra.continueLog = defaultContinueLogName.value
+    } else {
+      gui.ghidra.continueLog = ''
+    }
   }
 }
 
@@ -688,6 +758,16 @@ watch(
       !gui.ghidra.forkTo.trim()
     ) {
       gui.ghidra.forkTo = defaultForkName.value
+    }
+    // Mirror the fork behaviour for base mode: pre-fill the required
+    // continue-log with `<projectName>-<N>` when the user switches to
+    // `base`, unless they have already typed a custom value.
+    if (
+      newMode === 'base' &&
+      ghidraProjectSelection.value !== NEW_PROJECT_SENTINEL &&
+      !gui.ghidra.continueLog.trim()
+    ) {
+      gui.ghidra.continueLog = defaultContinueLogName.value
     }
   }
 )
@@ -796,6 +876,10 @@ const gui = reactive({
     mode: 'new' as string,
     forkTo: '' as string,
     forkOnTask: false,
+    // Path to a "continue log" — only meaningful when mode === 'base',
+    // lets a new run resume / pick up where a previous base-mode run
+    // left off.  Empty means "start fresh".
+    continueLog: '' as string,
     saveProject: true,
     noCreateProgram: false,
     overwriteProject: false,
@@ -829,7 +913,7 @@ const gui = reactive({
 })
 
 onMounted(async () => {
-  await Promise.all([loadRuntimeConfigs(), loadGhidraProjects()])
+  await Promise.all([loadRuntimeConfigs(), loadGhidraProjects(), loadUpdateStatus(), loadAvailableModules()])
 })
 
 async function loadRuntimeConfigs() {
@@ -838,6 +922,71 @@ async function loadRuntimeConfigs() {
     runtimeConfigs.value = data.configs || []
   } catch (_e: any) {
     runtimeConfigs.value = []
+  }
+}
+
+// ---- Available modules (for task dropdown) ---------------------------------
+
+const availableModules = ref<ModuleEntry[]>([])
+
+async function loadAvailableModules() {
+  try {
+    const { data } = await moduleApi.list()
+    availableModules.value = data.modules || []
+  } catch (_e: any) {
+    availableModules.value = []
+  }
+}
+
+/**
+ * Compute the option list for a task's Main Class <select>.
+ *
+ * Includes all available modules plus the current value (if non-empty
+ * and not already in the list) so that editing an existing config that
+ * references a deleted/unloaded module doesn't silently drop the value.
+ */
+function moduleOptionsFor(currentValue: string): { value: string; label: string; group: string }[] {
+  const opts = availableModules.value.map(m => ({
+    value: m.mainClassName,
+    label: m.mainClassName.split('.').pop()!,
+    group: m.owner ? 'Private' : 'Public',
+  }))
+  if (currentValue.trim() && !opts.some(o => o.value === currentValue.trim())) {
+    opts.unshift({ value: currentValue.trim(), label: currentValue.trim() + ' (not found)', group: 'Current' })
+  }
+  return opts
+}
+
+// ---- Auto-update ------------------------------------------------------------
+
+const updateStatus = reactive({
+  lastCheck: null as string | null,
+  currentVersion: null as string | null,
+  latestVersion: null as string | null,
+  updateAvailable: false,
+  stagedArtifacts: [] as string[],
+  error: null as string | null
+})
+const checkingUpdates = ref(false)
+
+async function loadUpdateStatus() {
+  try {
+    const { data } = await updateApi.getStatus()
+    Object.assign(updateStatus, data)
+  } catch (_e: any) {
+    // Non-fatal — the update endpoint may not exist on older builds.
+  }
+}
+
+async function checkForUpdates() {
+  checkingUpdates.value = true
+  try {
+    const { data } = await updateApi.check()
+    Object.assign(updateStatus, data)
+  } catch (e: any) {
+    updateStatus.error = e?.response?.data?.error || e?.message || 'Failed to check for updates'
+  } finally {
+    checkingUpdates.value = false
   }
 }
 
@@ -879,6 +1028,15 @@ function guiToJson(): string {
   if (gp.mode === 'fork') {
     const forkTarget = (gp.forkTo || '').trim() || defaultForkName.value
     gproj.forkTo = forkTarget
+  }
+  // For base mode, the continue-log is required.  Default an empty
+  // value to `<projectName>-<N>` (mirroring fork's forkTo defaulting)
+  // so the saved config is always usable — the UI also validates this
+  // upstream, but this guarantees correctness even if the JSON editor
+  // path is used.
+  if (gp.mode === 'base') {
+    const cl = (gp.continueLog || '').trim() || defaultContinueLogName.value
+    if (cl) gproj.continueLog = cl
   }
   gproj.forkOnTask = gp.forkOnTask
   gproj.overwriteProject = gp.overwriteProject
@@ -1007,6 +1165,14 @@ function jsonToGui(json: string) {
     }
     gui.ghidra.forkTo = gproj.forkTo || ''
     gui.ghidra.forkOnTask = gproj.forkOnTask || false
+    gui.ghidra.continueLog = gproj.continueLog || ''
+    // If loading a base-mode config that has no continue-log (e.g. an
+    // older config saved before this field existed), pre-fill the
+    // required default so the field is never shown empty.
+    if (gui.ghidra.mode === 'base' && !gui.ghidra.continueLog.trim() &&
+        ghidraProjectSelection.value !== NEW_PROJECT_SENTINEL) {
+      gui.ghidra.continueLog = defaultContinueLogName.value
+    }
     gui.ghidra.saveProject = gproj.saveProject || false
     gui.ghidra.noCreateProgram = gproj.noCreateProgram || false
     gui.ghidra.overwriteProject = gproj.overwriteProject || false
@@ -1134,6 +1300,15 @@ async function saveRuntimeConfig() {
     configError.value = 'Configuration name is required.'
     return
   }
+  // In GUI mode, enforce that base mode has a continue-log value
+  // (it is a required field, mirroring how fork requires a forkTo).
+  if (editorMode.value === 'gui' &&
+      gui.ghidra.mode === 'base' &&
+      ghidraProjectSelection.value !== NEW_PROJECT_SENTINEL &&
+      !gui.ghidra.continueLog.trim()) {
+    configError.value = 'Continue Log is required when Ghidra Project mode is "base".'
+    return
+  }
   // If in GUI mode, sync to JSON first
   if (editorMode.value === 'gui') {
     runtimeConfigJson.value = guiToJson()
@@ -1224,6 +1399,15 @@ function handleTabKey(e: KeyboardEvent) {
 
 <style scoped>
 .settings { display: flex; flex-direction: column; gap: 18px; }
+
+.update-banner {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+.error-text { color: #dc3545; margin: 8px 0; }
 
 .card {
   background: #fff;

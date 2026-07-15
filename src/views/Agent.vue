@@ -171,6 +171,22 @@
               <span class="status-pill-dot"></span>
               <span class="status-pill-label">{{ statusLabel(activeSessionMeta.status) }}</span>
             </span>
+            <!-- Pause/Resume button: only for managed sessions that are
+                 running or paused. -->
+            <button
+              v-if="canPauseSession"
+              class="btn-link pause-btn"
+              :title="'Pause the agent after the current LLM response completes'"
+              :disabled="pausingSession"
+              @click="pauseSession"
+            >⏸ Pause</button>
+            <button
+              v-if="canResumeSession"
+              class="btn-link resume-btn"
+              :title="'Resume the paused agent'"
+              :disabled="pausingSession"
+              @click="resumeSession"
+            >▶ Resume</button>
             <!--
               The "Tree" button was removed in favour of the left-side
               session list, which already exposes parent/child links via
@@ -200,11 +216,8 @@
           <div v-else-if="messages.length === 0" class="muted small">
             No messages yet. Send a message to start the conversation.
           </div>
-          <div
-            v-for="m in visibleMessages"
-            :key="m.messageId"
-            :class="['msg', m.role]"
-          >
+          <template v-for="m in visibleMessages" :key="m.messageId">
+            <div :class="['msg', m.role]">
             <!-- Wake-event separator: rendered as a divider line -->
             <!-- with a label, NOT as a chat bubble. -->
             <div v-if="isWakeEventMessage(m)" class="wake-separator">
@@ -214,6 +227,14 @@
                 {{ wakeEventLabel(m) }}
               </div>
               <div class="wake-separator-line"></div>
+            </div>
+            <!-- LLM retry status: rendered as an inline notice, not a
+                 chat bubble.  Shows how many times the LLM call has
+                 timed out and when the next retry will happen. -->
+            <div v-else-if="isLLMRetryStatusMessage(m)" class="llm-retry-notice" :class="{ 'llm-retry-recovered': isLLMRetryRecovered(m) }">
+              <span v-if="!isLLMRetryRecovered(m)" class="llm-retry-icon">⏳</span>
+              <span v-else class="llm-retry-icon">✅</span>
+              <span class="llm-retry-text">{{ llmRetryLabel(m, nowTick) }}</span>
             </div>
             <template v-else>
             <div class="msg-header">
@@ -287,6 +308,8 @@
             <div v-else class="content" v-html="renderMarkdown(m.content)"></div>
             </template>
           </div>
+          </template>
+          <!-- Transient messages after the last server message (not yet answered) -->
           <div v-if="sending" class="msg assistant pending">
             <div class="role">Akiba</div>
             <div class="content"><span class="dot-flash">Thinking…</span></div>
@@ -307,8 +330,8 @@
           <span v-if="sessionModelName" class="token-model">{{ sessionModelName }}</span>
         </div>
 
-        <div v-if="isAutomatedSession" class="automated-banner">
-          ⚠ Current session is in an automated task, you need to go to Workflows to abort it for manual intervention.
+        <div v-if="isManagedSession" class="automated-banner">
+          ⚠ This is a managed session. Messages you send will be injected into the agent's context as user hints — they appear before the next LLM call. If the agent is stopped or errored, your message will restart it.
         </div>
 
         <div v-if="errorMsg" class="error-banner">{{ errorMsg }}</div>
@@ -336,16 +359,36 @@
           </div>
 
           <form class="composer" @submit.prevent="sendMessage">
-            <textarea
-              v-model="input"
-              :placeholder="isAutomatedSession ? 'This is an automated analysis session — chat is read-only' : 'Type your message and press Ctrl/⌘ + Enter to send…'"
-              rows="3"
-              @keydown="onComposerKeydown"
-              :disabled="sending || isAutomatedSession"
-            ></textarea>
-            <button class="btn-primary" type="submit" :disabled="sending || !input.trim() || isAutomatedSession">
-              {{ sending ? 'Sending…' : 'Send' }}
-            </button>
+            <div v-if="isManagedSession" class="inject-mode-row">
+              <label class="inject-mode-label">
+                <input type="radio" v-model="injectTransient" :value="false" />
+                Persistent (saved in history)
+              </label>
+              <label class="inject-mode-label">
+                <input type="radio" v-model="injectTransient" :value="true" />
+                Transient (this turn only)
+              </label>
+            </div>
+            <div class="composer-input-row">
+              <textarea
+                v-model="input"
+                :placeholder="isManagedSession
+                  ? 'Type a hint to guide the agent and press Ctrl/⌘ + Enter to inject…'
+                  : 'Type your message and press Ctrl/⌘ + Enter to send…'"
+                rows="3"
+                @keydown="onComposerKeydown"
+                :disabled="sending"
+              ></textarea>
+              <button class="btn-primary" type="submit" :disabled="sending || !input.trim()">
+                {{ sending ? 'Sending…' : (isManagedSession ? 'Inject' : 'Send') }}
+              </button>
+              <button
+                v-if="sending && !isManagedSession"
+                class="btn-secondary cancel-chat-btn"
+                type="button"
+                @click="cancelChat"
+              >Cancel</button>
+            </div>
           </form>
         </div>
       </div>
@@ -436,7 +479,7 @@
     <div v-if="showNewModal" class="modal" @click.self="showNewModal = false">
       <div class="modal-content wide">
         <h2>New Agent Session</h2>
-        <p class="subtitle">Select a binary file to analyze, or skip to start an empty session.</p>
+        <p class="subtitle">Search for a binary file to analyze, or use an existing Ghidra project.</p>
 
         <div v-if="llmConfigs.length === 0" class="no-llm-warning">
           <strong>No LLM configuration found.</strong>
@@ -444,74 +487,148 @@
           <a href="#/settings" class="llm-link">Settings</a> before the agent can respond.
         </div>
 
-        <div class="form-group">
-          <label>Search files</label>
-          <div class="search-row">
-            <input
-              v-model="fileSearchQuery"
-              placeholder="Search by name, ID, architecture…"
-              @keydown.enter="searchFiles"
-              class="search-input"
-            />
-            <button class="btn-secondary" @click="searchFiles" :disabled="searching">
-              {{ searching ? 'Searching…' : 'Search' }}
-            </button>
-          </div>
+        <!-- Mode tabs -->
+        <div class="session-mode-tabs">
+          <button
+            :class="['tab-btn', { active: sessionCreateMode === 'binary' }]"
+            @click="sessionCreateMode = 'binary'"
+          >Search Binary</button>
+          <button
+            :class="['tab-btn', { active: sessionCreateMode === 'project' }]"
+            @click="sessionCreateMode = 'project'"
+          >Use Existing Project</button>
         </div>
 
-        <div v-if="searchError" class="error">{{ searchError }}</div>
-
-        <div v-if="searchResults.length > 0" class="file-list">
-          <div
-            v-for="f in searchResults"
-            :key="f.id"
-            :class="['file-item', { selected: selectedFile?.id === f.id }]"
-            @click="selectFileForSession(f)"
-          >
-            <div class="file-name">{{ f.name }}</div>
-            <div class="file-meta">
-              <span class="tag">ID: {{ f.id }}</span>
-              <span v-if="f.arch" class="tag">{{ f.arch }}</span>
-              <span v-if="f.format" class="tag">{{ f.format }}</span>
+        <!-- Tab 1: Binary search (legacy flow) -->
+        <div v-if="sessionCreateMode === 'binary'">
+          <div class="form-group">
+            <label>Search files</label>
+            <div class="search-row">
+              <input
+                v-model="fileSearchQuery"
+                placeholder="Search by name, ID, architecture…"
+                @keydown.enter="searchFiles"
+                class="search-input"
+              />
+              <button class="btn-secondary" @click="searchFiles" :disabled="searching">
+                {{ searching ? 'Searching…' : 'Search' }}
+              </button>
             </div>
           </div>
-        </div>
-        <div v-else-if="fileSearchQuery && !searching" class="muted small">
-          No matching files found.
+
+          <div v-if="searchError" class="error">{{ searchError }}</div>
+
+          <div v-if="searchResults.length > 0" class="file-list">
+            <div
+              v-for="f in searchResults"
+              :key="f.id"
+              :class="['file-item', { selected: selectedFile?.id === f.id }]"
+              @click="selectFileForSession(f)"
+            >
+              <div class="file-name">{{ f.name }}</div>
+              <div class="file-meta">
+                <span class="tag">ID: {{ f.id }}</span>
+                <span v-if="f.arch" class="tag">{{ f.arch }}</span>
+                <span v-if="f.format" class="tag">{{ f.format }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="fileSearchQuery && !searching" class="muted small">
+            No matching files found.
+          </div>
+
+          <div v-if="selectedFile" class="form-group project-group">
+            <label>Ghidra project</label>
+            <div class="project-mode-row">
+              <label class="radio-label">
+                <input type="radio" value="new" v-model="projectMode" />
+                Create new project
+              </label>
+              <label class="radio-label">
+                <input type="radio" value="existing" v-model="projectMode" :disabled="ghidraProjects.length === 0" />
+                Use existing project
+              </label>
+            </div>
+            <input
+              v-if="projectMode === 'new'"
+              v-model="selectedProjectName"
+              class="search-input"
+              placeholder="Project name"
+            />
+            <select v-else v-model="selectedProjectName" class="search-input">
+              <option value="" disabled>— Select project —</option>
+              <option v-for="p in ghidraProjects" :key="p" :value="p">{{ p }}</option>
+            </select>
+            <div class="muted small project-hint">
+              run_module and Ghidra scripts will use this project for the selected binary.
+            </div>
+            <div v-if="projectNameError" class="error project-error">{{ projectNameError }}</div>
+          </div>
         </div>
 
-        <div v-if="selectedFile" class="form-group project-group">
-          <label>Ghidra project</label>
-          <div class="project-mode-row">
-            <label class="radio-label">
-              <input type="radio" value="new" v-model="projectMode" />
-              Create new project
-            </label>
-            <label class="radio-label">
-              <input type="radio" value="existing" v-model="projectMode" :disabled="ghidraProjects.length === 0" />
-              Use existing project
-            </label>
+        <!-- Tab 2: Use existing project → pick program -->
+        <div v-if="sessionCreateMode === 'project'">
+          <div class="form-group">
+            <label>Select Ghidra project</label>
+            <select v-model="selectedExistingProject" class="search-input" @change="onExistingProjectChange">
+              <option value="" disabled>— Select project —</option>
+              <option v-for="p in ghidraProjects" :key="p" :value="p">{{ p }}</option>
+            </select>
           </div>
-          <input
-            v-if="projectMode === 'new'"
-            v-model="selectedProjectName"
-            class="search-input"
-            placeholder="Project name"
-          />
-          <select v-else v-model="selectedProjectName" class="search-input">
-            <option value="" disabled>— Select project —</option>
-            <option v-for="p in ghidraProjects" :key="p" :value="p">{{ p }}</option>
-          </select>
-          <div class="muted small project-hint">
-            run_module and Ghidra scripts will use this project for the selected binary.
+
+          <div v-if="loadingPrograms" class="muted small">Loading programs…</div>
+          <div v-else-if="programList.length > 0" class="file-list">
+            <div
+              v-for="prog in programList"
+              :key="prog.name"
+              :class="['file-item', { selected: selectedProgram?.name === prog.name }]"
+              @click="selectedProgram = prog"
+            >
+              <div class="file-name">{{ prog.name }}</div>
+              <div class="file-meta">
+                <span class="tag">{{ prog.path }}</span>
+              </div>
+            </div>
           </div>
-          <div v-if="projectNameError" class="error project-error">{{ projectNameError }}</div>
+          <div v-else-if="selectedExistingProject && !loadingPrograms" class="muted small">
+            No programs found in this project.
+          </div>
         </div>
 
         <div class="modal-actions">
           <button @click="showNewModal = false" class="btn-secondary">Cancel</button>
           <button @click="createSession" class="btn-primary" :disabled="!canCreateSession">
-            {{ creatingSession ? 'Creating…' : selectedFile ? `Analyze "${selectedFile.name}"` : 'Start Empty' }}
+            {{ creatingSession ? 'Creating…' : createButtonLabel }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tool confirmation modal (human-in-the-loop) -->
+    <div v-if="confirmationState" class="confirm-overlay" @click.self>
+      <div class="confirm-modal">
+        <div class="confirm-header">
+          <span class="confirm-icon">⚠️</span>
+          <span class="confirm-title">Tool Confirmation Required</span>
+        </div>
+        <div class="confirm-body">
+          <p class="confirm-tool">
+            <span class="confirm-label">Tool:</span>
+            <code>{{ confirmationState.toolName }}</code>
+          </p>
+          <p class="confirm-label-text">The agent wants to execute:</p>
+          <pre class="confirm-command">{{ confirmationState.command }}</pre>
+          <div class="confirm-meta">
+            <div><span class="confirm-label">Working dir:</span> <code>{{ confirmationState.workingDirectory }}</code></div>
+            <div><span class="confirm-label">Timeout:</span> {{ confirmationState.timeout }}s</div>
+          </div>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn-secondary" @click="denyConfirmation" :disabled="confirmationBusy">
+            Deny
+          </button>
+          <button class="btn-primary confirm-approve" @click="approveConfirmation" :disabled="confirmationBusy">
+            {{ confirmationBusy ? '…' : 'Approve' }}
           </button>
         </div>
       </div>
@@ -521,8 +638,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { agentApi, fileApi, llmConfigApi, workflowApi } from '@/services/api'
-import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage } from '@/types'
+import { agentApi, fileApi, llmConfigApi, workflowApi, projectApi } from '@/services/api'
+import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage, PendingConfirmation } from '@/types'
 import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
 import SessionTreeItem from '@/components/SessionTreeItem.vue'
@@ -599,6 +716,11 @@ const modalError = ref('')
 const input = ref('')
 const tokenUsage = ref<{ input: number; output: number } | null>(null)
 
+// Ticks every second to force re-render of the LLM retry countdown.
+// Only started when there's an active retry-status message.
+const nowTick = ref(Date.now())
+let nowTickInterval: number | null = null
+
 // Token tracking (computed from all assistant messages)
 const roundInputTokens = ref(0)
 const roundOutputTokens = ref(0)
@@ -617,6 +739,63 @@ const isAutomatedSession = computed(() => {
   const s = findSessionById(activeSessionId.value)
   return !!s?.moduleName && s.moduleName !== 'chat' && !isTerminalStatus(s?.status)
 })
+
+/**
+ * True for ALL non-chat sessions, regardless of runtime state
+ * (running, standby, closed, error).  When true, the chat input
+ * is enabled and messages are sent via /inject (mailbox) instead
+ * of /chat (synchronous manual turn).
+ */
+const isManagedSession = computed(() => {
+  const s = findSessionById(activeSessionId.value)
+  return !!s?.moduleName && s.moduleName !== 'chat'
+})
+
+// ---- Pause / Resume ----
+const pausingSession = ref(false)
+
+const canPauseSession = computed(() => {
+  const s = findSessionById(activeSessionId.value)
+  if (!s || !isManagedSession.value) return false
+  const st = (s.status ?? '').toLowerCase()
+  return st === 'running' || st === 'msghandle'
+})
+
+const canResumeSession = computed(() => {
+  const s = findSessionById(activeSessionId.value)
+  if (!s || !isManagedSession.value) return false
+  const st = (s.status ?? '').toLowerCase()
+  return st === 'paused'
+})
+
+async function pauseSession() {
+  if (!activeSessionId.value || pausingSession.value) return
+  pausingSession.value = true
+  try {
+    await agentApi.pause(activeSessionId.value)
+    await refreshActiveStatus()
+  } catch (e: any) {
+    errorMsg.value = e?.response?.data?.error || e?.message || 'Failed to pause session.'
+  } finally {
+    pausingSession.value = false
+  }
+}
+
+async function resumeSession() {
+  if (!activeSessionId.value || pausingSession.value) return
+  pausingSession.value = true
+  try {
+    await agentApi.resume(activeSessionId.value)
+    await refreshActiveStatus()
+  } catch (e: any) {
+    errorMsg.value = e?.response?.data?.error || e?.message || 'Failed to resume session.'
+  } finally {
+    pausingSession.value = false
+  }
+}
+
+/** Transient vs persistent delivery for injected messages. */
+const injectTransient = ref(false)
 
 const messagesEl = ref<HTMLElement | null>(null)
 
@@ -768,6 +947,7 @@ onUnmounted(() => {
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
   stopStatusPolling()
   stopListPolling()
+  if (nowTickInterval) { clearInterval(nowTickInterval); nowTickInterval = null }
   // Clear the hover card's leave-debounce timer to prevent a
   // dangling setTimeout from firing after unmount and clobbering
   // a now-orphaned ref.
@@ -993,7 +1173,7 @@ const hoveredKind = computed<'non-terminal' | 'terminal' | 'unknown'>(() => {
   const s = (hoveredSession.value?.status ?? '').toLowerCase()
   if (
     s === 'running' || s === 'standby' || s === 'msghandle' ||
-    s === 'cancelling' || s === 'active' || s === 'suspended'
+    s === 'paused' || s === 'cancelling' || s === 'active' || s === 'suspended'
   ) return 'non-terminal'
   if (
     s === 'closed' || s === 'error' ||
@@ -1021,7 +1201,29 @@ const projectNameError = computed(() => {
   }
   return ''
 })
-const canCreateSession = computed(() => !creatingSession.value)
+
+// ---- New session: "Use Existing Project" tab state ----
+const sessionCreateMode = ref<'binary' | 'project'>('binary')
+const selectedExistingProject = ref('')
+const programList = ref<{ name: string; path: string }[]>([])
+const selectedProgram = ref<{ name: string; path: string } | null>(null)
+const loadingPrograms = ref(false)
+
+const canCreateSession = computed(() => {
+  if (creatingSession.value) return false
+  if (sessionCreateMode.value === 'binary') {
+    return true // empty session or with file — validation in createSession
+  }
+  // project mode: need both project and program selected
+  return !!selectedExistingProject.value && !!selectedProgram.value
+})
+
+const createButtonLabel = computed(() => {
+  if (sessionCreateMode.value === 'binary') {
+    return selectedFile.value ? `Analyze "${selectedFile.value.name}"` : 'Start Empty'
+  }
+  return selectedProgram.value ? `Analyze "${selectedProgram.value.name}"` : 'Select a program'
+})
 
 async function loadSessions() {
   loadingSessions.value = true
@@ -1048,6 +1250,10 @@ function openNewSessionModal() {
   selectedFile.value = null
   projectMode.value = 'new'
   selectedProjectName.value = defaultProjectName()
+  sessionCreateMode.value = 'binary'
+  selectedExistingProject.value = ''
+  programList.value = []
+  selectedProgram.value = null
   loadGhidraProjects()
 }
 
@@ -1107,24 +1313,50 @@ async function searchFiles() {
   }
 }
 
+async function onExistingProjectChange() {
+  selectedProgram.value = null
+  programList.value = []
+  if (!selectedExistingProject.value) return
+  loadingPrograms.value = true
+  try {
+    const { data } = await projectApi.programs(selectedExistingProject.value)
+    programList.value = data.programs || []
+  } catch {
+    programList.value = []
+  } finally {
+    loadingPrograms.value = false
+  }
+}
+
 async function createSession() {
   if (creatingSession.value) return
   modalError.value = ''
-  if (selectedFile.value && projectNameError.value) {
-    modalError.value = projectNameError.value
-    return
+
+  if (sessionCreateMode.value === 'binary') {
+    if (selectedFile.value && projectNameError.value) {
+      modalError.value = projectNameError.value
+      return
+    }
+  } else {
+    if (!selectedExistingProject.value || !selectedProgram.value) return
   }
+
   creatingSession.value = true
   errorMsg.value = ''
   try {
     const payload: any = {
       modelName: selectedLlmModel.value || undefined
     }
-    if (selectedFile.value) {
+    if (sessionCreateMode.value === 'binary' && selectedFile.value) {
       payload.binaryId = selectedFile.value.id
       payload.sessionName = `Analysis of ${selectedFile.value.name}`
       payload.projectName = selectedProjectName.value.trim()
       payload.projectMode = projectMode.value
+    } else if (sessionCreateMode.value === 'project') {
+      payload.projectName = selectedExistingProject.value
+      payload.projectMode = 'existing'
+      payload.programName = selectedProgram.value!.name
+      payload.sessionName = `Analysis of ${selectedProgram.value!.name}`
     }
     const { data } = await agentApi.createSession(payload)
     sessions.value.unshift(data)
@@ -1220,7 +1452,7 @@ function statusKind(status: string | null | undefined): 'non-terminal' | 'termin
   if (!status) return 'unknown'
   const s = status.toLowerCase()
   if (s === 'running' || s === 'standby' || s === 'msghandle' ||
-      s === 'cancelling' || s === 'active' || s === 'suspended') {
+      s === 'paused' || s === 'cancelling' || s === 'active' || s === 'suspended') {
     return 'non-terminal'
   }
   if (s === 'closed' || s === 'error' ||
@@ -1252,7 +1484,7 @@ function statusPillClasses(status: string | null | undefined): string[] {
   if (kind === 'non-terminal') out.push('status-pill-active')
   // Specific class — only when we have one defined.
   const specific = [
-    'running', 'standby', 'msghandle', 'cancelling', 'active',
+    'running', 'standby', 'msghandle', 'paused', 'cancelling', 'active',
     'closed', 'completed', 'cancelled', 'error', 'failed',
   ]
   if (specific.includes(s)) out.push(`status-pill-${s}`)
@@ -1272,6 +1504,7 @@ function statusLabel(status: string | null | undefined): string {
     case 'running': return 'Running'
     case 'standby': return 'Standby'
     case 'msghandle': return 'Handling mail'
+    case 'paused': return 'Paused'
     case 'cancelling': return 'Cancelling…'
     case 'active': return 'Active'
     case 'suspended': return 'Standby'
@@ -1302,6 +1535,7 @@ function statusTooltip(status: string | null | undefined): string {
     case 'running': return 'Agent is actively running.'
     case 'standby': return 'Parked after the primary task. Wakes on incoming mailbox messages.'
     case 'msghandle': return 'Draining mailbox messages before resuming the run loop.'
+    case 'paused': return 'Paused by user. The agent waits for resume. Messages still accumulate in the mailbox.'
     case 'cancelling': return 'Cancellation requested; finishing the in-flight step.'
     case 'active': return 'Agent is actively running.'
     case 'suspended': return 'Parked after the primary task. Wakes on incoming mailbox messages.'
@@ -1326,6 +1560,17 @@ async function refreshActiveStatus() {
   try {
     const { data } = await agentApi.getSession(id)
     applySessionUpdate(data)
+    // Detect pending tool-confirmation requests and surface them
+    // to the user via a modal. The backend sets `pendingConfirmation`
+    // when a tool (e.g. run_shell) is blocked waiting for approval.
+    const pc = data.pendingConfirmation
+    if (pc && !confirmationState.value) {
+      confirmationState.value = { ...pc, sessionId: id }
+    } else if (!pc && confirmationState.value?.sessionId === id) {
+      // The confirmation was resolved (approved/denied/timed out)
+      // and the backend cleared it — close our modal.
+      confirmationState.value = null
+    }
   } catch { /* ignore */ }
 }
 
@@ -1491,6 +1736,45 @@ function startStatusPolling() {
   statusPollInterval = window.setInterval(refreshActiveStatus, STATUS_POLL_MS)
 }
 
+// ---- Tool confirmation (human-in-the-loop) ----
+
+/**
+ * Current pending confirmation for the active session, or `null`.
+ *
+ * Set by [refreshActiveStatus] when the session response includes a
+ * `pendingConfirmation` field. Cleared when the backend no longer
+ * reports one (i.e. the user responded or the tool timed out).
+ */
+const confirmationState = ref<(PendingConfirmation & { sessionId: string }) | null>(null)
+const confirmationBusy = ref(false)
+
+/** User clicked Approve — deliver the decision to the backend. */
+async function approveConfirmation() {
+  const cs = confirmationState.value
+  if (!cs || confirmationBusy.value) return
+  confirmationBusy.value = true
+  try {
+    await agentApi.respondConfirmation(cs.sessionId, true)
+    // Don't close the modal here — the next status poll will see
+    // the confirmation is gone and clear it. This keeps the UI
+    // in sync with the actual backend state.
+  } catch { /* ignore — next poll will retry */ } finally {
+    confirmationBusy.value = false
+  }
+}
+
+/** User clicked Deny — deliver the decision to the backend. */
+async function denyConfirmation() {
+  const cs = confirmationState.value
+  if (!cs || confirmationBusy.value) return
+  confirmationBusy.value = true
+  try {
+    await agentApi.respondConfirmation(cs.sessionId, false)
+  } catch { /* ignore */ } finally {
+    confirmationBusy.value = false
+  }
+}
+
 function stopStatusPolling() {
   if (statusPollInterval != null) {
     clearInterval(statusPollInterval)
@@ -1517,6 +1801,8 @@ async function selectSession(id: string) {
   messages.value = []
   selectedWakeIndex.value = -1
   tokenUsage.value = null
+  // Clear any stale confirmation modal from the previous session.
+  confirmationState.value = null
   loadingMessages.value = true
   // Stop previous polling
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
@@ -1584,16 +1870,21 @@ async function selectSession(id: string) {
 }
 
 async function deleteSession(id: string) {
-  if (!confirm('Delete this session?')) return
-  // Find the parent before we drop the session, so we can refresh
-  // its children count afterwards.  The session might be in the
-  // top-level list, in the transient map (if it was a sub-agent
-  // we were viewing), or in some cached `childrenBySessionId` entry.
-  const deleted = sessions.value.find(s => s.sessionId === id)
+  // Reject deletion of sessions that are still running.  The
+  // backend also enforces this, but checking here gives the user
+  // immediate feedback without a round-trip.
+  const session = sessions.value.find(s => s.sessionId === id)
     ?? transientSessionsById.value[id]
     ?? Object.values(childrenBySessionId.value)
       .flat()
       .find(s => s.sessionId === id)
+  if (session && !isTerminalStatus(session.status)) {
+    alert('This session is still running. Please end the flow first before deleting.')
+    return
+  }
+  if (!confirm('Delete this session and all of its sub-agent sessions?')) return
+  // Reuse the session we already found above for parent lookup.
+  const deleted = session
   try {
     await agentApi.deleteSession(id)
     sessions.value = sessions.value.filter((s) => s.sessionId !== id)
@@ -1633,8 +1924,14 @@ async function deleteSession(id: string) {
       messages.value = []
       tokenUsage.value = null
     }
-  } catch (e) {
-    console.error('Failed to delete session:', e)
+  } catch (e: any) {
+    const status = e?.response?.status
+    const msg = e?.response?.data?.error || e?.message || 'Failed to delete session'
+    if (status === 409) {
+      alert(msg)
+    } else {
+      console.error('Failed to delete session:', e)
+    }
   }
 }
 
@@ -1646,29 +1943,72 @@ async function sendMessage() {
   sending.value = true
   startMessagePolling(ACTIVE_CHAT_POLL_MS)
 
-  // Optimistic user message
-  const tempUser: AgentMessage = {
+  // For transient injects, skip the optimistic message — a
+  // temporary bubble that disappears on refresh would be confusing
+  // since transient messages are not persisted to agent_messages.
+  // For persistent injects and manual chat, keep the optimistic
+  // bubble for immediate feedback.
+  const skipOptimistic = isManagedSession.value && injectTransient.value
+
+  // Optimistic user message (skipped for transient injects)
+  const tempUser: AgentMessage | null = skipOptimistic ? null : {
     messageId: -Date.now(),
     messageIndex: messages.value.length,
     role: 'user',
-    content,
+    content: isManagedSession.value ? `[User hint] ${content}` : content,
     createdAt: new Date().toISOString()
   }
-  messages.value.push(tempUser)
+  if (tempUser) {
+    messages.value.push(tempUser)
+  }
   await scrollToBottom()
 
   try {
-    await agentApi.chat(activeSessionId.value, content)
+    if (isManagedSession.value) {
+      // Managed session (automated / standby / closed / error):
+      // inject via mailbox, not synchronous chat.
+      const res = await agentApi.inject(
+        activeSessionId.value,
+        content,
+        injectTransient.value,
+      )
+      // The response confirms delivery; actual message appears
+      // when the agent's next iteration drains the mailbox.
+      // Transient messages are written to the session transcript
+      // by the backend, so they appear in the exported record.
+      if (res.data.resumed) {
+        // Session was resumed from closed/error — restart polling
+        // to pick up the new agent output.
+        startMessagePolling(ACTIVE_CHAT_POLL_MS)
+      }
+    } else {
+      // Manual chat session: synchronous /chat as before.
+      await agentApi.chat(activeSessionId.value, content)
+    }
     // Reload all messages from server to capture tool calls too
     await refreshMessages()
   } catch (e: any) {
-    messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
-    errorMsg.value = e?.response?.data?.error || e?.message || 'Chat failed.'
+    if (tempUser) {
+      messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
+    }
+    errorMsg.value = e?.response?.data?.error || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
     input.value = content
   } finally {
     sending.value = false
     startMessagePolling()
   }
+}
+
+async function cancelChat() {
+  if (!activeSessionId.value || !sending.value) return
+  try {
+    await agentApi.cancelChat(activeSessionId.value)
+    errorMsg.value = ''
+  } catch {
+    // The process may have already finished; ignore errors.
+  }
+  // The sendMessage() call will return with an error once the
+  // process is killed; sending.value will be reset there.
 }
 
 function onComposerKeydown(e: KeyboardEvent) {
@@ -1730,6 +2070,53 @@ const WAKE_EVENT_PREFIX = '[[AKIBA_WAKE_EVENT]]'
 function isWakeEventMessage(m: AgentMessage): boolean {
   return m.role === 'user' &&
     (m.content ?? '').trimStart().startsWith(WAKE_EVENT_PREFIX)
+}
+
+const LLM_RETRY_STATUS_PREFIX = '__llm_retry_status__'
+
+function isLLMRetryStatusMessage(m: AgentMessage): boolean {
+  return m.role === 'system' &&
+    (m.content ?? '').startsWith(LLM_RETRY_STATUS_PREFIX)
+}
+
+function isLLMRetryRecovered(m: AgentMessage): boolean {
+  return (m.content ?? '').includes('status=recovered')
+}
+
+function llmRetryLabel(m: AgentMessage, _nowTick?: number): string {
+  const content = m.content ?? ''
+  if (isLLMRetryRecovered(m)) {
+    const match = content.match(/retry=(\d+)/)
+    const n = match ? match[1] : '?'
+    return `LLM connection recovered after retry #${n}.`
+  }
+  // Parse retry count and backoff
+  const retryMatch = content.match(/retry=(\d+)/)
+  const backoffMatch = content.match(/backoffMs=(\d+)/)
+  const nextRetryMatch = content.match(/nextRetryEpochMs=(\d+)/)
+  const errorMatch = content.match(/error=(.*)/)
+
+  const retryNum = retryMatch ? parseInt(retryMatch[1]) : '?'
+  const backoffMs = backoffMatch ? parseInt(backoffMatch[1]) : 0
+  const backoffLabel = formatDuration(backoffMs)
+  const errorMsg = errorMatch ? errorMatch[1] : 'unknown error'
+
+  // If we have the next-retry epoch, show a countdown
+  if (nextRetryMatch) {
+    const nextRetryEpoch = parseInt(nextRetryMatch[1])
+    const remaining = nextRetryEpoch - Date.now()
+    if (remaining > 0) {
+      const remainingLabel = formatDuration(remaining)
+      return `LLM request failed (${errorMsg}). Retry #${retryNum} in ${remainingLabel} (total wait ${backoffLabel}).`
+    }
+  }
+  return `LLM request failed (${errorMsg}). Retry #${retryNum} scheduled (wait ${backoffLabel}).`
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min`
+  return `${(ms / 3_600_000).toFixed(1)}h`
 }
 
 function wakeEventLabel(m: AgentMessage): string {
@@ -1797,8 +2184,51 @@ const visibleMessages = computed(() => {
   return messages.value.filter(m => seg.messageIds.has(m.messageId))
 })
 
+// Start/stop the 1-second tick timer based on whether the latest
+// visible message is an active (non-recovered) LLM retry notice.
+// This drives the countdown text without polling the server faster.
+watch(visibleMessages, (msgs) => {
+  const last = msgs[msgs.length - 1]
+  const need = !!last && isLLMRetryStatusMessage(last) && !isLLMRetryRecovered(last)
+  if (need && !nowTickInterval) {
+    nowTickInterval = window.setInterval(() => { nowTick.value = Date.now() }, 1000)
+  } else if (!need && nowTickInterval) {
+    clearInterval(nowTickInterval)
+    nowTickInterval = null
+  }
+}, { immediate: true })
+
+/**
+ * Collapsed summary line for a tool-call message.
+ *
+ * For `script_library` calls we surface the concrete script name (and the
+ * action) directly in the collapsed `<summary>` so the user doesn't have to
+ * expand the call to know *which* script ran — e.g.
+ * "🛠 script_library · run: disassemble_function".  For any other tool we
+ * keep the legacy `🛠 <name>` form.
+ */
 function toolSummary(m: AgentMessage): string {
   const name = m.toolName || 'tool'
+  if (name === 'script_library') {
+    const args = parseToolArgs(m.toolResult || m.content || '')
+    if (args) {
+      const action = args['action'] as string | undefined
+      const scriptName = args['scriptName'] as string | undefined
+      if (action && scriptName) {
+        return `🛠 ${name} · ${action}: ${scriptName}`
+      }
+      if (scriptName) {
+        return `🛠 ${name} · ${scriptName}`
+      }
+      if (action === 'search') {
+        const keyword = args['keyword'] as string | undefined
+        return `🛠 ${name} · search ${keyword ? `"${keyword}"` : '(all)'}`
+      }
+      if (action) {
+        return `🛠 ${name} · ${action}`
+      }
+    }
+  }
   return `🛠 ${name}`
 }
 
@@ -2602,12 +3032,41 @@ onUnmounted(() => {
   color: #1565c0;
   box-shadow: 0 1px 3px rgba(25, 118, 210, 0.25);
 }
+
+/* Pause / Resume buttons in the chat header */
+.pause-btn, .resume-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+.pause-btn:hover { background: #fff3e0; border-color: #ff9800; }
+.resume-btn:hover { background: #e3f2fd; border-color: #1976d2; }
+.pause-btn:disabled, .resume-btn:disabled { opacity: 0.5; cursor: wait; }
+.cancel-chat-btn {
+  font-size: 12px;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
 .status-pill.status-pill-standby {
   /* STANDBY gets its own distinct colour so a parked agent
      reads differently from one that is actively running. */
   background: #e0f2f1;
   color: #00695c;
   box-shadow: 0 1px 3px rgba(0, 150, 136, 0.25);
+}
+.status-pill.status-pill-paused {
+  background: #fff3e0;
+  color: #e65100;
+  box-shadow: 0 1px 3px rgba(255, 152, 0, 0.25);
+}
+.status-pill.status-pill-paused .status-pill-dot {
+  animation: none;
+  opacity: 0.8;
 }
 .status-pill.status-pill-standby .status-pill-dot {
   /* Slower pulse for standby — parked, not racing. */
@@ -2966,6 +3425,33 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+/* LLM retry status notice — shown inline in the message list when
+   the LLM call fails and enters the retry loop. */
+.llm-retry-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin: 6px 0;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #856404;
+}
+.llm-retry-notice.llm-retry-recovered {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #155724;
+}
+.llm-retry-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.llm-retry-text {
+  flex: 1;
+}
+
 /* Wake segment selector dropdown in the chat header.
    Only visible when the session has 2+ wake events. */
 .wake-selector {
@@ -3312,9 +3798,44 @@ onUnmounted(() => {
 
 .composer {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 14px 16px;
   background: #fafafa;
+}
+
+.composer-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.composer textarea {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.inject-mode-row {
+  display: flex;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.inject-mode-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+}
+
+.inject-mode-label input[type="radio"] {
+  margin: 0;
 }
 
 .composer textarea {
@@ -3378,6 +3899,30 @@ onUnmounted(() => {
 .modal-content.wide { width: 650px; }
 .modal-content h2 { margin-bottom: 6px; font-size: 20px; }
 .subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
+
+.session-mode-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 2px solid #eee;
+}
+.tab-btn {
+  padding: 8px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #888;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: #555; }
+.tab-btn.active {
+  color: #e94560;
+  border-bottom-color: #e94560;
+  font-weight: 600;
+}
 
 .no-llm-warning {
   background: #fff3cd;
@@ -3631,6 +4176,115 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
   font-size: 10px;
   color: #888;
+}
+
+/* ---- Tool confirmation modal ---- */
+.confirm-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.confirm-modal {
+  background: var(--bg-card, #1e1e2e);
+  border: 1px solid var(--border-color, #333346);
+  border-radius: 12px;
+  max-width: 600px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color, #333346);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.confirm-icon { font-size: 18px; }
+.confirm-title { color: var(--text-primary, #cdd6f4); }
+
+.confirm-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.confirm-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary, #a6adc8);
+}
+.confirm-tool code {
+  background: var(--bg-accent, #313244);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--accent, #cba6f7);
+}
+
+.confirm-label { font-weight: 600; }
+.confirm-label-text {
+  font-size: 13px;
+  color: var(--text-secondary, #a6adc8);
+  margin: 0;
+}
+
+.confirm-command {
+  background: var(--bg-accent, #181825);
+  border: 1px solid var(--border-color, #313244);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  color: var(--text-primary, #cdd6f4);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.confirm-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #a6adc8);
+}
+.confirm-meta code {
+  background: var(--bg-accent, #313244);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color, #333346);
+}
+
+.confirm-approve {
+  background: var(--accent-green, #a6e3a1) !important;
+  color: #1e1e2e !important;
+}
+.confirm-approve:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 </style>
 

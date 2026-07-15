@@ -146,6 +146,7 @@ export const agentApi = {
     binaryId?: number
     projectName?: string
     projectMode?: 'new' | 'existing'
+    programName?: string
     parentSessionId?: string
   } = {}) =>
     api.post<AgentSession>('/agent/sessions', payload),
@@ -156,6 +157,17 @@ export const agentApi = {
       content,
       systemPrompt
     }),
+  inject: (sessionId: string, message: string, transient: boolean = false) =>
+    api.post<{ status: string; sessionId: string; transient: boolean; runtimeState: string; resumed: boolean; hint: string }>(
+      `/agent/sessions/${sessionId}/inject`,
+      { message, transient }
+    ),
+  pause: (sessionId: string) =>
+    api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/pause`),
+  resume: (sessionId: string) =>
+    api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/resume`),
+  cancelChat: (sessionId: string) =>
+    api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/cancel-chat`),
   deleteSession: (sessionId: string) =>
     api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
   /**
@@ -188,6 +200,19 @@ export const agentApi = {
   getConversation: (sessionId: string, conversationId: number | string) =>
     api.get<{ conversationId: number; messageCount: number; messages: ConversationMessage[] }>(
       `/agent/sessions/${sessionId}/conversations/${conversationId}`
+    ),
+  /**
+   * Respond to a pending tool-confirmation request for this session.
+   *
+   * When `pendingConfirmation` is present on the session (detected via
+   * `getSession`), the frontend shows a modal. The user clicks Approve
+   * or Deny, which calls this endpoint to deliver the decision to the
+   * blocked tool thread.
+   */
+  respondConfirmation: (sessionId: string, approved: boolean) =>
+    api.post<{ status: string; sessionId: string; approved: boolean; message: string }>(
+      `/agent/sessions/${sessionId}/confirmation/respond`,
+      { approved }
     ),
 }
 
@@ -241,12 +266,28 @@ export const fileApi = {
 
 export const projectApi = {
   list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
+  programs: (projectName: string) =>
+    api.get<{ programs: { name: string; path: string }[] }>(`/projects/${encodeURIComponent(projectName)}/programs`),
   exportProject: (name: string) =>
     api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' }),
   exportTextStatus: (name: string) =>
     api.get<ExportTextStatus>(`/projects/${encodeURIComponent(name)}/export_text/status`),
   exportText: (name: string, options: ExportTextRequest) =>
     api.post(`/projects/${encodeURIComponent(name)}/export_text`, options, { responseType: 'blob' }),
+  /**
+   * Import a `.gar` (Ghidra Archive) as a standalone project. The backend
+   * extracts the archive, registers every program in the binaries table
+   * (hash-deduped), and renames programs to `<id>-<originalName>`.
+   */
+  importGar: (file: File, projectName?: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (projectName) form.append('projectName', projectName)
+    return api.post('/projects/import-gar', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0, // import can take a while for large archives
+    })
+  },
 }
 
 export interface ExportTextStatus {
@@ -404,3 +445,40 @@ export interface RuntimeConfig {
 }
 
 export default api
+
+// ---- Module jar management -------------------------------------------------
+
+export interface ModuleEntry {
+  mainClassName: string
+  jarFileName: string
+  /** null for public modules; the owning username for private modules */
+  owner: string | null
+  jarPath: string
+}
+
+export const moduleApi = {
+  list: () => api.get<{ modules: ModuleEntry[] }>('/modules'),
+  upload: (formData: FormData) =>
+    api.post<{ message: string; module: ModuleEntry }>('/modules/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0,
+    }),
+  delete: (jarFileName: string) =>
+    api.delete<{ message: string }>(`/modules/${encodeURIComponent(jarFileName)}`),
+}
+
+// ---- Auto-update ------------------------------------------------------------
+
+export interface UpdateStatus {
+  lastCheck: string | null
+  currentVersion: string | null
+  latestVersion: string | null
+  updateAvailable: boolean
+  stagedArtifacts: string[]
+  error: string | null
+}
+
+export const updateApi = {
+  getStatus: () => api.get<UpdateStatus>('/update/status'),
+  check: () => api.post<UpdateStatus>('/update/check'),
+}

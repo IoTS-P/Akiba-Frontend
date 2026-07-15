@@ -2,7 +2,19 @@
   <div class="projects-page">
     <div class="toolbar">
       <span class="title">Ghidra Projects – {{ projects.length }} project(s)</span>
-      <button class="refresh-btn" @click="fetchProjects" :disabled="loading">Refresh</button>
+      <div class="toolbar-actions">
+        <button class="import-gar-btn" @click="triggerGarImport" :disabled="importing">
+          {{ importing ? 'Importing…' : 'Import .gar' }}
+        </button>
+        <input
+          ref="garFileInput"
+          type="file"
+          accept=".gar"
+          style="display: none"
+          @change="onGarFileSelected"
+        />
+        <button class="refresh-btn" @click="fetchProjects" :disabled="loading">Refresh</button>
+      </div>
     </div>
     <div v-if="loading" class="loading">Loading projects…</div>
     <div v-else-if="error" class="error">{{ error }}</div>
@@ -45,8 +57,7 @@
 
     <!-- Text export options modal -->
     <div v-if="textExportModal.show" class="modal-overlay" @click.self="closeTextExportModal">
-      <div class="modal-content">
-        <div class="modal-header">
+      <div class="modal-content">        <div class="modal-header">
           <h3>Export Text — {{ textExportModal.projectName }}</h3>
           <button class="modal-close" @click="closeTextExportModal">×</button>
         </div>
@@ -211,6 +222,60 @@
         </div>
       </div>
     </div>
+
+    <!-- .gar import result modal -->
+    <div v-if="garImportResult" class="modal-overlay" @click.self="closeGarImportModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Import .gar — {{ garImportResult.projectName }}</h3>
+          <button class="modal-close" @click="closeGarImportModal">×</button>
+        </div>
+        <div class="gar-programs">
+          <p class="gar-summary">
+            Imported {{ garImportResult.programs.length }} program(s):
+          </p>
+          <table class="gar-programs-table">
+            <thead>
+              <tr>
+                <th>Original</th>
+                <th>Renamed to</th>
+                <th>Binary ID</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in garImportResult.programs" :key="p.name">
+                <td>{{ p.name }}</td>
+                <td>{{ p.renamedTo }}</td>
+                <td>{{ p.binaryId }}</td>
+                <td>
+                  <span v-if="p.error" class="gar-prog-error">{{ p.error }}</span>
+                  <span v-else-if="p.newlyImported" class="gar-prog-new">new</span>
+                  <span v-else class="gar-prog-reused">reused</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-primary" @click="closeGarImportModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- .gar import error modal -->
+    <div v-if="garImportError" class="modal-overlay" @click.self="closeGarImportModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Import .gar failed</h3>
+          <button class="modal-close" @click="closeGarImportModal">×</button>
+        </div>
+        <div class="gar-error-body">{{ garImportError }}</div>
+        <div class="modal-footer">
+          <button class="btn-primary" @click="closeGarImportModal">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -225,6 +290,22 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const exporting = ref<string | null>(null)
 const textExporting = ref<string | null>(null)
+
+// --- .gar import state ---
+const garFileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const garImportResult = ref<{
+  projectName: string
+  programs: Array<{
+    name: string
+    renamedTo: string
+    binaryId: number
+    checksum: string
+    newlyImported: boolean
+    error: string | null
+  }>
+} | null>(null)
+const garImportError = ref<string | null>(null)
 
 // --- Text export modal state ---
 const textExportModal = reactive({
@@ -267,6 +348,39 @@ async function fetchProjects() {
   } finally {
     loading.value = false
   }
+}
+
+function triggerGarImport() {
+  garFileInput.value?.click()
+}
+
+async function onGarFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  // Reset the input so selecting the same file twice still fires change.
+  input.value = ''
+
+  importing.value = true
+  garImportError.value = null
+  garImportResult.value = null
+  try {
+    // Derive a default project name from the file name (minus .gar); the
+    // user can rename later by re-exporting if needed.
+    const defaultName = file.name.replace(/\.gar$/i, '')
+    const res = await projectApi.importGar(file, defaultName)
+    garImportResult.value = res.data
+    await fetchProjects()
+  } catch (e: any) {
+    garImportError.value = e.response?.data?.error ?? e.message ?? 'Import failed'
+  } finally {
+    importing.value = false
+  }
+}
+
+function closeGarImportModal() {
+  garImportResult.value = null
+  garImportError.value = null
 }
 
 async function exportProject(name: string) {
@@ -380,6 +494,11 @@ onMounted(fetchProjects)
   align-items: center;
   margin-bottom: 20px;
 }
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .toolbar .title {
   font-size: 15px;
   color: #666;
@@ -392,6 +511,17 @@ onMounted(fetchProjects)
   cursor: pointer;
 }
 .refresh-btn:hover { border-color: #e94560; color: #e94560; }
+.import-gar-btn {
+  padding: 6px 16px;
+  border: 1px solid #4a90d9;
+  border-radius: 6px;
+  background: #4a90d9;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.import-gar-btn:hover:not(:disabled) { background: #357abd; }
+.import-gar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .loading, .error, .empty {
   text-align: center;
@@ -661,5 +791,49 @@ select.text-input {
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* --- .gar import result --- */
+.gar-programs {
+  padding: 16px 24px;
+}
+.gar-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #555;
+}
+.gar-programs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.gar-programs-table th {
+  text-align: left;
+  padding: 6px 10px;
+  background: #f5f5f5;
+  color: #444;
+  border-bottom: 1px solid #e0e0e0;
+}
+.gar-programs-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #eaeaea;
+  font-family: monospace;
+}
+.gar-prog-new {
+  color: #2e7d32;
+  font-weight: 600;
+}
+.gar-prog-reused {
+  color: #666;
+}
+.gar-prog-error {
+  color: #e94560;
+}
+.gar-error-body {
+  padding: 24px;
+  color: #e94560;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
