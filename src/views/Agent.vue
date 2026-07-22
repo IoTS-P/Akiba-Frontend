@@ -235,6 +235,14 @@
               <span v-if="!isLLMRetryRecovered(m)" class="llm-retry-icon">⏳</span>
               <span v-else class="llm-retry-icon">✅</span>
               <span class="llm-retry-text">{{ llmRetryLabel(m, nowTick) }}</span>
+              <button
+                v-if="!isLLMRetryRecovered(m) && isLastVisibleMessage(m)"
+                class="llm-retry-now-btn"
+                @click="retryNow"
+                :disabled="retryingNow"
+              >
+                {{ retryingNow ? 'Retrying…' : 'Retry Now' }}
+              </button>
             </div>
             <template v-else>
             <div class="msg-header">
@@ -609,19 +617,30 @@
       <div class="confirm-modal">
         <div class="confirm-header">
           <span class="confirm-icon">⚠️</span>
-          <span class="confirm-title">Tool Confirmation Required</span>
+          <span class="confirm-title">
+            {{ confirmationState.action === 'file_access' ? 'File Access Outside Workspace' : 'Tool Confirmation Required' }}
+          </span>
         </div>
         <div class="confirm-body">
           <p class="confirm-tool">
             <span class="confirm-label">Tool:</span>
             <code>{{ confirmationState.toolName }}</code>
           </p>
-          <p class="confirm-label-text">The agent wants to execute:</p>
-          <pre class="confirm-command">{{ confirmationState.command }}</pre>
-          <div class="confirm-meta">
-            <div><span class="confirm-label">Working dir:</span> <code>{{ confirmationState.workingDirectory }}</code></div>
-            <div><span class="confirm-label">Timeout:</span> {{ confirmationState.timeout }}s</div>
-          </div>
+          <template v-if="confirmationState.action === 'file_access'">
+            <p class="confirm-label-text">
+              The agent wants to <strong>{{ confirmationState.command.split(' ')[0] }}</strong>
+              a file <strong>outside</strong> the workspace:
+            </p>
+            <pre class="confirm-command">{{ confirmationState.targetPath || confirmationState.command }}</pre>
+          </template>
+          <template v-else>
+            <p class="confirm-label-text">The agent wants to execute:</p>
+            <pre class="confirm-command">{{ confirmationState.command }}</pre>
+            <div class="confirm-meta">
+              <div><span class="confirm-label">Working dir:</span> <code>{{ confirmationState.workingDirectory }}</code></div>
+              <div><span class="confirm-label">Timeout:</span> {{ confirmationState.timeout }}s</div>
+            </div>
+          </template>
         </div>
         <div class="confirm-actions">
           <button class="btn-secondary" @click="denyConfirmation" :disabled="confirmationBusy">
@@ -2074,9 +2093,28 @@ function isWakeEventMessage(m: AgentMessage): boolean {
 
 const LLM_RETRY_STATUS_PREFIX = '__llm_retry_status__'
 
+const retryingNow = ref(false)
+
 function isLLMRetryStatusMessage(m: AgentMessage): boolean {
   return m.role === 'system' &&
     (m.content ?? '').startsWith(LLM_RETRY_STATUS_PREFIX)
+}
+
+function isLastVisibleMessage(m: AgentMessage): boolean {
+  const msgs = visibleMessages.value
+  return msgs.length > 0 && msgs[msgs.length - 1].messageId === m.messageId
+}
+
+async function retryNow() {
+  if (!activeSessionId.value || retryingNow.value) return
+  retryingNow.value = true
+  try {
+    await agentApi.retryNow(activeSessionId.value)
+  } catch {
+    // Session may not be in this runtime — ignore
+  } finally {
+    retryingNow.value = false
+  }
 }
 
 function isLLMRetryRecovered(m: AgentMessage): boolean {
@@ -3450,6 +3488,26 @@ onUnmounted(() => {
 }
 .llm-retry-text {
   flex: 1;
+}
+.llm-retry-now-btn {
+  padding: 4px 12px;
+  border: 1px solid #856404;
+  border-radius: 4px;
+  background: #fff3cd;
+  color: #856404;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.llm-retry-now-btn:hover:not(:disabled) {
+  background: #ffc107;
+  color: #fff;
+}
+.llm-retry-now-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Wake segment selector dropdown in the chat header.

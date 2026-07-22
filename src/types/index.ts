@@ -154,6 +154,10 @@ export interface PendingConfirmation {
   command: string
   workingDirectory: string
   timeout: number
+  /** Action type: "shell_command" or "file_access" */
+  action?: string
+  /** Target path for file_access actions (null for shell_command) */
+  targetPath?: string | null
   createdAt: number
 }
 

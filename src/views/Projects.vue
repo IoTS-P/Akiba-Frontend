@@ -50,6 +50,20 @@
             >
               {{ textExporting === project.name ? 'Exporting…' : 'Export Text' }}
             </button>
+            <button
+              class="export-workspace-btn"
+              @click="exportWorkspace(project.name)"
+              :disabled="workspaceExporting === project.name"
+            >
+              {{ workspaceExporting === project.name ? 'Exporting…' : 'Export Workspace' }}
+            </button>
+            <button
+              class="delete-project-btn"
+              @click="openDeleteModal(project.name)"
+              :disabled="deleting === project.name"
+            >
+              {{ deleting === project.name ? 'Deleting…' : 'Delete' }}
+            </button>
           </td>
         </tr>
       </tbody>
@@ -276,6 +290,44 @@
         </div>
       </div>
     </div>
+
+    <!-- Delete project confirmation modal -->
+    <div v-if="deleteModal.show" class="modal-overlay" @click.self="closeDeleteModal">
+      <div class="modal-content delete-modal">
+        <div class="modal-header">
+          <h3 class="delete-modal-title">Delete Project</h3>
+          <button class="modal-close" @click="closeDeleteModal">×</button>
+        </div>
+        <div class="delete-modal-body">
+          <p class="delete-warning">
+            You are about to permanently delete the Ghidra project:
+          </p>
+          <p class="delete-project-name">{{ deleteModal.projectName }}</p>
+          <p class="delete-hint">
+            This will remove the project files (<code>{{ deleteModal.projectName }}.gpr</code> and
+            <code>{{ deleteModal.projectName }}.rep/</code>) from disk. This action cannot be undone.
+          </p>
+          <label class="delete-logs-option">
+            <input type="checkbox" v-model="deleteModal.deleteLogs" />
+            <span>Also delete associated log directories</span>
+          </label>
+          <p class="delete-logs-hint">
+            Scans all log directories for config files referencing this project and deletes matching ones.
+            This includes logs from normal runs, fork runs, and base/continue runs.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="closeDeleteModal" :disabled="deleteModal.deleting">Cancel</button>
+          <button
+            class="btn-danger"
+            @click="confirmDelete"
+            :disabled="deleteModal.deleting"
+          >
+            {{ deleteModal.deleting ? 'Deleting…' : 'Delete Project' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -290,6 +342,16 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const exporting = ref<string | null>(null)
 const textExporting = ref<string | null>(null)
+const workspaceExporting = ref<string | null>(null)
+const deleting = ref<string | null>(null)
+
+// --- Delete project modal state ---
+const deleteModal = reactive({
+  show: false,
+  projectName: '',
+  deleteLogs: false,
+  deleting: false,
+})
 
 // --- .gar import state ---
 const garFileInput = ref<HTMLInputElement | null>(null)
@@ -404,6 +466,27 @@ async function exportProject(name: string) {
   }
 }
 
+async function exportWorkspace(name: string) {
+  workspaceExporting.value = name
+  try {
+    const res = await projectApi.exportWorkspace(name)
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${name}-workspace.zip`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  } catch (e: any) {
+    const msg = e.response?.data?.error ?? e.message ?? 'Workspace export failed'
+    alert(`Workspace export failed: ${msg}`)
+  } finally {
+    workspaceExporting.value = null
+  }
+}
+
 async function startTextExport(name: string) {
   textExporting.value = name
   textExportModal.show = true
@@ -475,6 +558,38 @@ async function doTextExport() {
     alert(`Text export failed: ${msg}`)
   } finally {
     textExportModal.exporting = false
+  }
+}
+
+function openDeleteModal(name: string) {
+  deleteModal.show = true
+  deleteModal.projectName = name
+  deleteModal.deleteLogs = false
+  deleteModal.deleting = false
+}
+
+function closeDeleteModal() {
+  if (deleteModal.deleting) return
+  deleteModal.show = false
+  deleteModal.projectName = ''
+  deleting.value = null
+}
+
+async function confirmDelete() {
+  if (!deleteModal.projectName) return
+  deleteModal.deleting = true
+  deleting.value = deleteModal.projectName
+  try {
+    await projectApi.deleteProject(deleteModal.projectName, deleteModal.deleteLogs)
+    deleteModal.show = false
+    deleteModal.projectName = ''
+    await fetchProjects()
+  } catch (e: any) {
+    const msg = e.response?.data?.error ?? e.message ?? 'Delete failed'
+    alert(`Failed to delete project: ${msg}`)
+  } finally {
+    deleteModal.deleting = false
+    deleting.value = null
   }
 }
 
@@ -570,6 +685,24 @@ onMounted(fetchProjects)
 .export-text-btn {
   border-color: #4a90d9;
   color: #4a90d9;
+}
+.export-workspace-btn {
+  padding: 4px 14px;
+  border: 1px solid #6c757d;
+  border-radius: 4px;
+  background: #fff;
+  color: #6c757d;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.export-workspace-btn:hover:not(:disabled) {
+  background: #6c757d;
+  color: #fff;
+}
+.export-workspace-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .export-btn:hover:not(:disabled), .export-text-btn:hover:not(:disabled) {
   background: #e94560;
@@ -835,5 +968,93 @@ select.text-input {
   font-size: 13px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- Delete project --- */
+.delete-project-btn {
+  padding: 4px 14px;
+  border: 1px solid #dc3545;
+  border-radius: 4px;
+  background: #fff;
+  color: #dc3545;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.delete-project-btn:hover:not(:disabled) {
+  background: #dc3545;
+  color: #fff;
+}
+.delete-project-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.delete-modal {
+  width: 480px;
+}
+.delete-modal-title {
+  color: #dc3545;
+}
+.delete-modal-body {
+  padding: 20px 24px;
+}
+.delete-warning {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 8px;
+}
+.delete-project-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #dc3545;
+  margin: 0 0 12px;
+  word-break: break-all;
+}
+.delete-hint {
+  font-size: 13px;
+  color: #888;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.delete-hint code {
+  font-family: monospace;
+  background: #f0f0f0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.delete-logs-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #333;
+  margin-bottom: 6px;
+}
+.delete-logs-option input {
+  margin-top: 3px;
+  cursor: pointer;
+}
+.delete-logs-hint {
+  font-size: 12px;
+  color: #999;
+  margin: 0 0 0 24px;
+  line-height: 1.4;
+}
+.btn-danger {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #dc3545;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-danger:hover:not(:disabled) { background: #c82333; }
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

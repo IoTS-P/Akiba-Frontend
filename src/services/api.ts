@@ -168,6 +168,8 @@ export const agentApi = {
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/resume`),
   cancelChat: (sessionId: string) =>
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/cancel-chat`),
+  retryNow: (sessionId: string) =>
+    api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/retry-now`),
   deleteSession: (sessionId: string) =>
     api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
   /**
@@ -270,6 +272,8 @@ export const projectApi = {
     api.get<{ programs: { name: string; path: string }[] }>(`/projects/${encodeURIComponent(projectName)}/programs`),
   exportProject: (name: string) =>
     api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' }),
+  exportWorkspace: (name: string) =>
+    api.get(`/projects/${encodeURIComponent(name)}/export_workspace`, { responseType: 'blob' }),
   exportTextStatus: (name: string) =>
     api.get<ExportTextStatus>(`/projects/${encodeURIComponent(name)}/export_text/status`),
   exportText: (name: string, options: ExportTextRequest) =>
@@ -288,6 +292,10 @@ export const projectApi = {
       timeout: 0, // import can take a while for large archives
     })
   },
+  deleteProject: (name: string, deleteLogs: boolean = false) =>
+    api.delete(`/projects/${encodeURIComponent(name)}`, {
+      params: { deleteLogs },
+    }),
 }
 
 export interface ExportTextStatus {
