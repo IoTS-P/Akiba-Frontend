@@ -12,7 +12,9 @@ import type {
   AgentMessage,
   ChatTurnResponse,
   ConversationSummary,
-  ConversationMessage
+  ConversationMessage,
+  PendingConfirmation,
+  PendingUserChoice
 } from '@/types'
 
 const api = axios.create({
@@ -151,7 +153,7 @@ export const agentApi = {
   } = {}) =>
     api.post<AgentSession>('/agent/sessions', payload),
   getMessages: (sessionId: string) =>
-    api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number }>(`/agent/sessions/${sessionId}/messages`),
+    api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number; contextLengthObserved?: boolean }>(`/agent/sessions/${sessionId}/messages`),
   chat: (sessionId: string, content: string, systemPrompt?: string) =>
     api.post<ChatTurnResponse>(`/agent/sessions/${sessionId}/chat`, {
       content,
@@ -170,6 +172,28 @@ export const agentApi = {
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/cancel-chat`),
   retryNow: (sessionId: string) =>
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/retry-now`),
+  /**
+   * Incremental poll for live LLM streaming chunks.  `since` is the
+   * highest chunkCount already consumed; the backend returns only
+   * newer chunks plus a `generation` counter that bumps whenever a
+   * new LLM generation starts (the caller must reset its accumulated
+   * text and re-pull from zero on change).
+   */
+  getStreamChunks: (sessionId: string, since: number) =>
+    api.get<{
+      active: boolean
+      generation: number
+      latestCount: number
+      done: boolean
+      error?: string | null
+      chunks: Array<{
+        delta: string
+        chunkCount: number
+        byteCount: number
+        done: boolean
+        error?: string | null
+      }>
+    }>(`/agent/sessions/${sessionId}/stream-chunks`, { params: { since } }),
   deleteSession: (sessionId: string) =>
     api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
   /**
@@ -215,6 +239,53 @@ export const agentApi = {
     api.post<{ status: string; sessionId: string; approved: boolean; message: string }>(
       `/agent/sessions/${sessionId}/confirmation/respond`,
       { approved }
+    ),
+  /**
+   * Snapshot of EVERY session that currently has a pending tool
+   * confirmation, keyed by sessionId.
+   *
+   * The per-session `getSession` poll only returns the confirmation
+   * for the session the user is currently viewing.  When a sub-agent
+   * is the one blocked on a confirmation, the user on the root
+   * session never sees the modal and the request times out silently
+   * — the worker process's stdout is captured into a per-worker log
+   * file, which the user sees as "the request was redirected to
+   * stdio".  Polling this endpoint from a top-level interval lets the
+   * frontend surface a single global modal for any session, regardless
+   * of which one the user is currently looking at.
+   */
+  listPendingConfirmations: () =>
+    api.get<{ pending: Record<string, PendingConfirmation> }>(
+      '/agent/pending-confirmations'
+    ),
+  /**
+   * Snapshot of every session with a pending `ask_user_choice` request,
+   * keyed by sessionId. Same rationale as `listPendingConfirmations`:
+   * a sub-agent may be the one waiting while the user views another session.
+   */
+  listPendingUserChoices: () =>
+    api.get<{ pending: Record<string, PendingUserChoice> }>(
+      '/agent/pending-user-choices'
+    ),
+  /**
+   * Deliver the user's answer to a pending `ask_user_choice` request:
+   * the selected option or custom text as `choice`, or `cancelled: true`
+   * when dismissed without answering.
+   */
+  respondUserChoice: (sessionId: string, choice: string | null, cancelled = false) =>
+    api.post<{ status: string; sessionId: string; answered: boolean; message: string }>(
+      `/agent/sessions/${sessionId}/user-choice/respond`,
+      { choice, cancelled }
+    ),
+  /**
+   * Ask a follow-up ("BTW") question while an `ask_user_choice` request
+   * is pending. Suspends server-side until the side assistant answers
+   * (up to ~4 min); also refreshes the request's inactivity timeout.
+   */
+  askUserChoiceBtw: (sessionId: string, question: string) =>
+    api.post<{ answered: boolean; answer?: string; error?: string }>(
+      `/agent/sessions/${sessionId}/user-choice/btw`,
+      { question }
     ),
 }
 
@@ -292,9 +363,9 @@ export const projectApi = {
       timeout: 0, // import can take a while for large archives
     })
   },
-  deleteProject: (name: string, deleteLogs: boolean = false) =>
+  deleteProject: (name: string, deleteLogs: boolean = false, deleteAgentSessions: boolean = false, deleteWorkspace: boolean = false) =>
     api.delete(`/projects/${encodeURIComponent(name)}`, {
-      params: { deleteLogs },
+      params: { deleteLogs, deleteAgentSessions, deleteWorkspace },
     }),
 }
 

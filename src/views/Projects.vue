@@ -315,6 +315,24 @@
             Scans all log directories for config files referencing this project and deletes matching ones.
             This includes logs from normal runs, fork runs, and base/continue runs.
           </p>
+          <label class="delete-logs-option">
+            <input type="checkbox" v-model="deleteModal.deleteAgentSessions" />
+            <span>Also delete all associated agent sessions</span>
+          </label>
+          <p class="delete-logs-hint">
+            Permanently removes every agent session (including sub-agents) whose project is
+            <code>{{ deleteModal.projectName }}</code>, along with all of their messages, tool
+            calls and graphs. This cannot be undone.
+          </p>
+          <label class="delete-logs-option">
+            <input type="checkbox" v-model="deleteModal.deleteWorkspace" />
+            <span>Also delete the workspace directory</span>
+          </label>
+          <p class="delete-logs-hint">
+            Removes <code>workspace/{{ deleteModal.projectName }}/</code> — the directory where
+            modules write intermediate outputs (analysis results, extracted files, shell
+            artifacts). This cannot be undone.
+          </p>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" @click="closeDeleteModal" :disabled="deleteModal.deleting">Cancel</button>
@@ -350,6 +368,8 @@ const deleteModal = reactive({
   show: false,
   projectName: '',
   deleteLogs: false,
+  deleteAgentSessions: false,
+  deleteWorkspace: false,
   deleting: false,
 })
 
@@ -565,6 +585,8 @@ function openDeleteModal(name: string) {
   deleteModal.show = true
   deleteModal.projectName = name
   deleteModal.deleteLogs = false
+  deleteModal.deleteAgentSessions = false
+  deleteModal.deleteWorkspace = false
   deleteModal.deleting = false
 }
 
@@ -580,7 +602,7 @@ async function confirmDelete() {
   deleteModal.deleting = true
   deleting.value = deleteModal.projectName
   try {
-    await projectApi.deleteProject(deleteModal.projectName, deleteModal.deleteLogs)
+    await projectApi.deleteProject(deleteModal.projectName, deleteModal.deleteLogs, deleteModal.deleteAgentSessions, deleteModal.deleteWorkspace)
     deleteModal.show = false
     deleteModal.projectName = ''
     await fetchProjects()

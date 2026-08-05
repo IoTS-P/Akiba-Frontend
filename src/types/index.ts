@@ -137,6 +137,11 @@ export interface AgentSession {
    * modal. `null`/absent when no confirmation is pending.
    */
   pendingConfirmation?: PendingConfirmation | null
+  /**
+   * Pending user-choice request for this session, if any (populated
+   * when `ask_user_choice` is blocked waiting for the user's pick).
+   */
+  pendingUserChoice?: PendingUserChoice | null
 }
 
 /**
@@ -159,6 +164,34 @@ export interface PendingConfirmation {
   /** Target path for file_access actions (null for shell_command) */
   targetPath?: string | null
   createdAt: number
+}
+
+/**
+ * A pending user-choice request surfaced to the user. Detected via
+ * `pendingUserChoice` on `AgentSession` or the global
+ * `/agent/pending-user-choices` poll; answered via
+ * `POST /agent/sessions/{id}/user-choice/respond`.
+ */
+export interface PendingUserChoice {
+  requestId: string
+  /** The question the agent is asking. */
+  question: string
+  /** Candidate answers offered by the agent. */
+  options: string[]
+  /** Whether the user may type a custom free-form answer. */
+  allowCustomInput: boolean
+  createdAt: number
+  /** Follow-up (BTW) Q&A pairs already answered by the side assistant. */
+  btwHistory?: BtwQA[]
+  /** Last user-activity timestamp; countdown = this + 10 minutes. */
+  lastActivityAt?: number
+}
+
+/** One follow-up (BTW) question/answer pair. */
+export interface BtwQA {
+  question: string
+  answer: string
+  answeredAt: number
 }
 
 export interface AgentMessage {

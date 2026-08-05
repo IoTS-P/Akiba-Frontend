@@ -217,7 +217,7 @@
             No messages yet. Send a message to start the conversation.
           </div>
           <template v-for="m in visibleMessages" :key="m.messageId">
-            <div :class="['msg', m.role]">
+            <div :class="['msg', m.role, { 'interrupted-partial': isInterruptedPartialMessage(m) }]">
             <!-- Wake-event separator: rendered as a divider line -->
             <!-- with a label, NOT as a chat bubble. -->
             <div v-if="isWakeEventMessage(m)" class="wake-separator">
@@ -244,10 +244,15 @@
                 {{ retryingNow ? 'Retrying…' : 'Retry Now' }}
               </button>
             </div>
+            <!-- __llm_progress__ heartbeat rows are internal debug
+                 signals: filtered OUT of visibleMessages entirely
+                 (see the comment there).  The single in-flight
+                 indicator is rendered once below the message list,
+                 next to the streaming bubble. -->
             <template v-else>
             <div class="msg-header">
               <span class="role">{{ roleLabel(m) }}</span>
-              <span class="time">{{ formatTime(m.createdAt) }}{{ m.role === 'tool' ? toolDurationLabel(m) : '' }}</span>
+              <span class="time">{{ formatTime(m.createdAt) }}{{ m.role === 'tool' ? toolDurationLabel(m) : '' }}<span v-if="isInterruptedPartialMessage(m)" class="interrupted-badge">⚠ interrupted partial</span></span>
             </div>
             <!-- Special rendering for sub-agent invocations -->
             <div
@@ -313,7 +318,7 @@
                 </div>
               </details>
             </div>
-            <div v-else class="content" v-html="renderMarkdown(m.content)"></div>
+            <div v-else class="content" v-html="renderMarkdown(displayContent(m))"></div>
             </template>
           </div>
           </template>
@@ -322,6 +327,62 @@
             <div class="role">Akiba</div>
             <div class="content"><span class="dot-flash">Thinking…</span></div>
           </div>
+          <!-- LLM in-flight indicator: a single compact notice shown
+               while an LLM call is running but no streaming text has
+               arrived yet (e.g. the model is still thinking before
+               the first token).  The raw __llm_progress__ heartbeat
+               rows themselves are hidden from the message list as
+               internal debug noise; once the streaming bubble has
+               text it IS the in-flight signal and this notice hides. -->
+          <div v-if="latestLLMProgress && !streamingText" class="llm-progress-notice">
+            <span class="llm-progress-spinner">⏳</span>
+            <span class="llm-progress-text">{{ llmProgressLabel(latestLLMProgress, nowTick) }}</span>
+          </div>
+          <!-- Live streaming bubble: shown while the chunk poller is
+               feeding us an in-flight LLM response.  The text grows
+               token-by-token (true "natural growth"), and the whole
+               bubble is replaced by the canonical assistant row from
+               the DB once the worker emits `done: true`.  If the
+               stream is INTERRUPTED mid-generation (provider stall),
+               the partial content stays on screen with a dimmed
+               background and a one-shot marker until the retry's new
+               generation replaces it. -->
+          <div v-if="streamingHtml || streamingThinkHtml || streamThinkingActive || streamInterruptedError"
+               class="msg assistant streaming-live"
+               :class="{ interrupted: !!streamInterruptedError }">
+            <div class="msg-header">
+              <span class="role">Akiba</span>
+              <span class="time streaming-live-time">
+                streaming<span v-if="streamingChunkCount > 0"> · {{ streamingChunkCount }} chunks</span>
+                <span v-if="streamStalled" class="stream-stall-indicator">
+                  <span class="stream-stall-spinner"></span> waiting for model…
+                </span>
+              </span>
+            </div>
+            <!-- Reasoning channel: models that emit <think>…</think>
+                 get a collapsible window instead of dumping the
+                 chain-of-thought into the body.  Expanded while the
+                 model is still thinking, auto-collapsed once the
+                 closing tag arrives; the user can re-open it. -->
+            <details v-if="streamingThinkHtml || streamThinkingActive"
+                     class="think-details" :open="streamThinkingActive">
+              <summary class="think-summary">
+                <span v-if="streamThinkingActive" class="stream-stall-spinner think-summary-spinner"></span>
+                {{ streamThinkingActive ? 'Thinking…' : 'Thought process' }}
+              </summary>
+              <div class="think-content" v-html="streamingThinkHtml"></div>
+            </details>
+            <!-- Rendered markdown (throttled ~150 ms behind the
+                 typewriter). -->
+            <div v-if="streamingHtml" class="content streaming-live-content" v-html="streamingHtml"></div>
+            <!-- One-shot interrupted marker: a separate element (NOT
+                 text appended to the bubble), so the 1 s poll cannot
+                 spam it. -->
+            <div v-if="streamInterruptedError" class="streaming-interrupted">
+              <span class="streaming-interrupted-icon">⚠</span>
+              <span>Output interrupted ({{ streamInterruptedError }}). Partial content preserved — retrying…</span>
+            </div>
+          </div>
         </div>
 
         <div class="token-bar">
@@ -329,8 +390,12 @@
           <span class="token-value">I:{{ roundInputTokens.toLocaleString() }}</span>
           <span class="token-value">O:{{ roundOutputTokens.toLocaleString() }}</span>
           <span class="token-value total">T:{{ totalTokens.toLocaleString() }}</span>
-          <span v-if="lastInputTokens != null && contextLength != null" class="token-value context">
-            Last input: {{ lastInputTokens.toLocaleString() }} / {{ contextLength.toLocaleString() }}
+          <span
+            v-if="lastInputTokens != null && contextLength != null"
+            class="token-value context"
+            :title="contextLengthObserved ? 'Empirical lower bound: the largest prompt this model has accepted so far. The true context window may be larger.' : ''"
+          >
+            Last input: {{ lastInputTokens.toLocaleString() }} / {{ contextLengthObserved ? '~' : '' }}{{ contextLength.toLocaleString() }}
           </span>
           <span v-if="lastInputTokens != null && contextLength == null" class="token-value context-dim" title="Failed to fetch model context limit. The remote model registry may be unreachable.">
             Last input: {{ lastInputTokens.toLocaleString() }}<span class="hint-icon"> ⚠</span>
@@ -340,6 +405,27 @@
 
         <div v-if="isManagedSession" class="automated-banner">
           ⚠ This is a managed session. Messages you send will be injected into the agent's context as user hints — they appear before the next LLM call. If the agent is stopped or errored, your message will restart it.
+        </div>
+
+        <!-- Connection-lost banner: shown when the pollers have
+             failed N consecutive times.  Distinct from `errorMsg`
+             (which is for one-shot action failures) because a lost
+             connection is a *persistent* state the user needs to
+             see until it's resolved. -->
+        <div v-if="connectionLost" class="connection-lost-banner" role="alert">
+          <span class="connection-lost-icon">⚠</span>
+          <span class="connection-lost-text">
+            Lost contact with the server ({{ pollFailureCount }} failed polls).
+            New messages and status updates may be delayed.
+            <template v-if="lastPollError"> Last error: {{ lastPollError }}</template>
+          </span>
+          <button
+            class="connection-lost-retry"
+            type="button"
+            @click="retryPollingNow"
+          >
+            Retry now
+          </button>
         </div>
 
         <div v-if="errorMsg" class="error-banner">{{ errorMsg }}</div>
@@ -626,6 +712,10 @@
             <span class="confirm-label">Tool:</span>
             <code>{{ confirmationState.toolName }}</code>
           </p>
+          <p v-if="confirmationSessionName" class="confirm-tool">
+            <span class="confirm-label">Agent:</span>
+            <code>{{ confirmationSessionName }}</code>
+          </p>
           <template v-if="confirmationState.action === 'file_access'">
             <p class="confirm-label-text">
               The agent wants to <strong>{{ confirmationState.command.split(' ')[0] }}</strong>
@@ -652,13 +742,95 @@
         </div>
       </div>
     </div>
+
+    <!-- User choice modal (ask_user_choice tool) -->
+    <div v-if="choiceState" class="confirm-overlay" @click.self>
+      <div class="confirm-modal">
+        <div class="confirm-header">
+          <span class="confirm-icon">❓</span>
+          <span class="confirm-title">Agent Asks for Your Choice</span>
+        </div>
+        <div class="confirm-body">
+          <p v-if="choiceSessionName" class="confirm-tool">
+            <span class="confirm-label">Agent:</span>
+            <code>{{ choiceSessionName }}</code>
+          </p>
+          <p class="confirm-label-text">{{ choiceState.question }}</p>
+          <div class="choice-options">
+            <label
+              v-for="(opt, idx) in choiceState.options"
+              :key="idx"
+              class="choice-option"
+              :class="{ selected: choiceSelected === opt }"
+            >
+              <input type="radio" name="ask-user-choice" :value="opt" v-model="choiceSelected" />
+              <span class="choice-option-text">{{ opt }}</span>
+            </label>
+            <label
+              v-if="choiceState.allowCustomInput"
+              class="choice-option"
+              :class="{ selected: choiceSelected === CUSTOM_CHOICE_VALUE }"
+            >
+              <input type="radio" name="ask-user-choice" :value="CUSTOM_CHOICE_VALUE" v-model="choiceSelected" />
+              <span class="choice-option-text">Custom answer…</span>
+            </label>
+          </div>
+          <textarea
+            v-if="choiceState.allowCustomInput && choiceSelected === CUSTOM_CHOICE_VALUE"
+            v-model="choiceCustomText"
+            class="choice-custom-input"
+            rows="3"
+            placeholder="Type your own answer…"
+          ></textarea>
+
+          <!-- Follow-up (BTW) questions: ask the side assistant for more
+               info before deciding. Submitting refreshes the timeout. -->
+          <div class="choice-btw">
+            <div class="choice-btw-header">
+              <span class="choice-btw-title">Need more info? Ask a follow-up first</span>
+              <span class="choice-countdown" title="The request auto-cancels after inactivity">
+                auto-cancel in {{ choiceCountdown }}
+              </span>
+            </div>
+            <div v-if="btwThread.length" class="choice-btw-thread">
+              <div v-for="(qa, i) in btwThread" :key="i" class="choice-btw-item">
+                <p class="choice-btw-q"><span class="choice-btw-tag">Q</span>{{ qa.question }}</p>
+                <p v-if="qa.answer" class="choice-btw-a"><span class="choice-btw-tag">A</span>{{ qa.answer }}</p>
+                <p v-else class="choice-btw-a choice-btw-pending"><span class="choice-btw-tag">A</span>Thinking…</p>
+              </div>
+            </div>
+            <div class="choice-btw-input-row">
+              <input
+                v-model="btwInput"
+                class="choice-btw-input"
+                type="text"
+                placeholder="e.g. Why these options? What did you find so far?"
+                :disabled="btwBusy"
+                @keyup.enter="askBtw"
+              />
+              <button class="btn-secondary" @click="askBtw" :disabled="btwBusy || !btwInput.trim()">
+                {{ btwBusy ? '…' : 'Ask' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn-secondary" @click="cancelChoice" :disabled="choiceBusy">
+            Cancel
+          </button>
+          <button class="btn-primary confirm-approve" @click="submitChoice" :disabled="choiceBusy || !canSubmitChoice">
+            {{ choiceBusy ? '…' : 'Submit' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { agentApi, fileApi, llmConfigApi, workflowApi, projectApi } from '@/services/api'
-import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage, PendingConfirmation } from '@/types'
+import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage, PendingConfirmation, PendingUserChoice, BtwQA } from '@/types'
 import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
 import SessionTreeItem from '@/components/SessionTreeItem.vue'
@@ -746,6 +918,8 @@ const roundOutputTokens = ref(0)
 const totalTokens = ref(0)
 const lastInputTokens = ref<number | null>(null)
 const contextLength = ref<number | null>(null)
+/** True when contextLength is an empirical lower bound, not the registry value. */
+const contextLengthObserved = ref(false)
 const sessionModelName = ref('')
 
 // Whether the active session is an automated (non-chat) agent session.
@@ -915,6 +1089,10 @@ onMounted(async () => {
   // poll (LIST_POLL_MS vs STATUS_POLL_MS).
   startListPolling()
 
+  // Global confirmation poll: surfaces confirmations raised by ANY
+  // session (e.g. a sub-agent), not just the one being viewed.
+  startGlobalConfirmationPolling()
+
   // Check URL params for a pre-selected session (e.g. from workflow detail)
   const params = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search)
   const presetSession = params.get('sessionId')
@@ -947,6 +1125,12 @@ onMounted(async () => {
       // status poll never started; start it now so the header pill
       // follows the preset session.
       startStatusPolling()
+      // Also start the streaming-chunk poll so any in-flight LLM
+      // response starts appearing token-by-token.  The preset
+      // fallback path skips selectSession() entirely, so without
+      // this call the poller never starts and the user only sees
+      // the 3-second DB polling — the exact bug being fixed here.
+      startStreamPolling(presetSession)
     } catch {
       // Fallback to default
       if (sessions.value.length > 0 && llmConfigs.value.length > 0) {
@@ -967,6 +1151,9 @@ onUnmounted(() => {
   stopStatusPolling()
   stopListPolling()
   if (nowTickInterval) { clearInterval(nowTickInterval); nowTickInterval = null }
+  if (choiceNowTickInterval) { clearInterval(choiceNowTickInterval); choiceNowTickInterval = null }
+  stopGlobalConfirmationPolling()
+  stopStreamPolling()
   // Clear the hover card's leave-debounce timer to prevent a
   // dangling setTimeout from firing after unmount and clobbering
   // a now-orphaned ref.
@@ -1410,12 +1597,59 @@ function isTerminalStatus(s: string | null | undefined): boolean {
       s === 'completed' || s === 'cancelled' || s === 'failed'
 }
 
+// ============================================================
+//  Poll-health tracking — surfaces "connection lost" UI
+// ============================================================
+//
+// Counts consecutive failures across all pollers; at the threshold a
+// persistent banner tells the user the frontend lost contact with the
+// backend. Any successful poll resets the counter and clears the banner.
+const pollFailureCount = ref(0)
+const POLL_FAILURE_THRESHOLD = 3
+const lastPollError = ref<string>('')
+
+const connectionLost = computed(() => pollFailureCount.value >= POLL_FAILURE_THRESHOLD)
+
+function recordPollSuccess() {
+  pollFailureCount.value = 0
+  lastPollError.value = ''
+}
+
+function recordPollFailure(err: unknown) {
+  pollFailureCount.value += 1
+  const msg = (err as any)?.response?.data?.error || (err as any)?.message || ''
+  if (msg) lastPollError.value = String(msg)
+}
+
+/** User clicked the banner's "Retry now" button. */
+async function retryPollingNow() {
+  pollFailureCount.value = 0
+  lastPollError.value = ''
+  // Fire the three pollers in parallel; their success paths will
+  // keep the counter at zero (or push it back up if the backend
+  // is still down).
+  await Promise.allSettled([
+    refreshMessages(),
+    refreshActiveStatus(),
+    refreshAllStatuses(),
+  ])
+}
+
 async function refreshMessages() {
   if (!activeSessionId.value) return
+  const polledSessionId = activeSessionId.value
   try {
-    const { data } = await agentApi.getMessages(activeSessionId.value)
+    const { data } = await agentApi.getMessages(polledSessionId)
+    // Guard against session switch during the async fetch:
+    // if the user switched to a different session while we were
+    // waiting for the response, discard the stale result.
+    if (activeSessionId.value !== polledSessionId) return
     const nextMessages = data.messages || []
-    const messagesChanged = JSON.stringify(nextMessages) !== JSON.stringify(messages.value)
+    // Lightweight change detection: compare length and last message ID
+    // instead of JSON.stringify on potentially large arrays.
+    const messagesChanged = nextMessages.length !== messages.value.length ||
+      (nextMessages.length > 0 && messages.value.length > 0 &&
+       nextMessages[nextMessages.length - 1].messageId !== messages.value[messages.value.length - 1].messageId)
     messages.value = nextMessages
     // Use backend-provided token stats; update even when message text is unchanged.
     roundInputTokens.value = data.totalInputTokens ?? 0
@@ -1423,8 +1657,12 @@ async function refreshMessages() {
     totalTokens.value = roundInputTokens.value + roundOutputTokens.value
     lastInputTokens.value = data.lastInputTokens ?? null
     contextLength.value = data.contextLength ?? null
+    contextLengthObserved.value = data.contextLengthObserved ?? false
     if (messagesChanged) await scrollToBottom()
-  } catch { /* ignore */ }
+    recordPollSuccess()
+  } catch (e) {
+    recordPollFailure(e)
+  }
 }
 
 function startMessagePolling(intervalMs = NORMAL_POLL_MS) {
@@ -1578,6 +1816,7 @@ async function refreshActiveStatus() {
   if (!id) return
   try {
     const { data } = await agentApi.getSession(id)
+    if (activeSessionId.value !== id) return  // session switched during fetch
     applySessionUpdate(data)
     // Detect pending tool-confirmation requests and surface them
     // to the user via a modal. The backend sets `pendingConfirmation`
@@ -1590,7 +1829,17 @@ async function refreshActiveStatus() {
       // and the backend cleared it — close our modal.
       confirmationState.value = null
     }
-  } catch { /* ignore */ }
+    // Same for pending user-choice requests (ask_user_choice tool).
+    const puc = data.pendingUserChoice
+    if (puc && !choiceState.value) {
+      openChoiceModal(id, puc)
+    } else if (!puc && choiceState.value?.sessionId === id) {
+      choiceState.value = null
+    }
+    recordPollSuccess()
+  } catch (e) {
+    recordPollFailure(e)
+  }
 }
 
 /**
@@ -1624,13 +1873,11 @@ async function refreshAllStatuses() {
     // elsewhere) are dropped so the UI doesn't show ghosts.
     //
     // For EXPANDED parents we additionally auto-insert any
-    // newly-spawned sub-agents found in this poll's `all` list.  This
-    // is what makes a running parent's new children appear live while
-    // it stays expanded — previously the user had to collapse and
-    // re-expand to see them.  Collapsed-but-cached parents keep the
-    // old behaviour (no auto-insert) since their children aren't
-    // visible anyway, and `toggleSessionExpand` re-fetches on the
-    // next expand.
+    // newly-spawned sub-agents found in this poll's `all` list, so a
+    // running parent's new children appear live while it stays
+    // expanded.  Collapsed parents skip auto-insert (their children
+    // aren't visible anyway); `toggleSessionExpand` re-fetches on
+    // the next expand.
     const cacheEntries = Object.entries(childrenBySessionId.value)
     if (cacheEntries.length > 0) {
       // Group the freshly-fetched sessions by parent so we can detect
@@ -1676,7 +1923,10 @@ async function refreshAllStatuses() {
       }
       childrenBySessionId.value = next
     }
-  } catch { /* ignore */ }
+    recordPollSuccess()
+  } catch (e) {
+    recordPollFailure(e)
+  }
 }
 
 /**
@@ -1767,6 +2017,220 @@ function startStatusPolling() {
 const confirmationState = ref<(PendingConfirmation & { sessionId: string }) | null>(null)
 const confirmationBusy = ref(false)
 
+/** Name of the agent that raised the open confirmation, if known. */
+const confirmationSessionName = computed(() => {
+  const cs = confirmationState.value
+  if (!cs) return null
+  return findSessionById(cs.sessionId)?.sessionName ?? cs.sessionId
+})
+
+// ---- User choice (ask_user_choice tool, human-in-the-loop) ----
+
+/** Sentinel v-model value for the "Custom answer…" radio option. */
+const CUSTOM_CHOICE_VALUE = '__custom__'
+
+/** Current pending user-choice request, or `null`. */
+const choiceState = ref<(PendingUserChoice & { sessionId: string }) | null>(null)
+const choiceBusy = ref(false)
+/** Currently selected option (an option string, or CUSTOM_CHOICE_VALUE). */
+const choiceSelected = ref('')
+/** Free-form text when the "Custom answer…" option is selected. */
+const choiceCustomText = ref('')
+
+/** Name of the agent that raised the open choice request, if known. */
+const choiceSessionName = computed(() => {
+  const cs = choiceState.value
+  if (!cs) return null
+  return findSessionById(cs.sessionId)?.sessionName ?? cs.sessionId
+})
+
+/** Submit is allowed once an option is picked (custom requires text). */
+const canSubmitChoice = computed(() => {
+  if (!choiceState.value) return false
+  if (choiceSelected.value === CUSTOM_CHOICE_VALUE) {
+    return choiceCustomText.value.trim().length > 0
+  }
+  return choiceSelected.value.length > 0
+})
+
+/** Open the choice modal with freshly reset selection state. */
+function openChoiceModal(sessionId: string, puc: PendingUserChoice) {
+  choiceSelected.value = ''
+  choiceCustomText.value = ''
+  btwInput.value = ''
+  btwThread.value = (puc.btwHistory || []).map(qa => ({ ...qa }))
+  choiceState.value = { ...puc, sessionId }
+}
+
+// ---- BTW (follow-up questions inside the choice modal) ----
+
+/** Inactivity timeout mirrored from the backend (10 minutes). */
+const CHOICE_TIMEOUT_MS = 600_000
+
+/** Follow-up question composer text. */
+const btwInput = ref('')
+const btwBusy = ref(false)
+/** Local copy of the Q&A thread (initialised from the backend history). */
+const btwThread = ref<BtwQA[]>([])
+
+/** 1s ticker driving the inactivity countdown display. */
+const choiceNowTick = ref(Date.now())
+let choiceNowTickInterval: number | null = null
+
+watch(choiceState, (v) => {
+  if (v && choiceNowTickInterval == null) {
+    choiceNowTickInterval = window.setInterval(() => { choiceNowTick.value = Date.now() }, 1000)
+  } else if (!v && choiceNowTickInterval != null) {
+    clearInterval(choiceNowTickInterval)
+    choiceNowTickInterval = null
+  }
+})
+
+/** Remaining inactivity time before the backend auto-cancels (m:ss). */
+const choiceCountdown = computed(() => {
+  const cs = choiceState.value
+  if (!cs) return ''
+  const base = cs.lastActivityAt ?? cs.createdAt
+  const remaining = Math.max(0, CHOICE_TIMEOUT_MS - (choiceNowTick.value - base))
+  const m = Math.floor(remaining / 60000)
+  const s = Math.floor((remaining % 60000) / 1000)
+  return `${m}:${s.toString().padStart(2, '0')}`
+})
+
+/** Send a follow-up question; the answer is appended to the thread. */
+async function askBtw() {
+  const cs = choiceState.value
+  const q = btwInput.value.trim()
+  if (!cs || !q || btwBusy.value) return
+  btwBusy.value = true
+  btwInput.value = ''
+  const idx = btwThread.value.length
+  btwThread.value.push({ question: q, answer: '', answeredAt: Date.now() })
+  try {
+    const { data } = await agentApi.askUserChoiceBtw(cs.sessionId, q)
+    const answer = data.answered && data.answer != null
+      ? data.answer
+      : (data.error || '(no answer — the request may already be resolved)')
+    btwThread.value[idx] = { question: q, answer, answeredAt: Date.now() }
+  } catch {
+    btwThread.value[idx] = {
+      question: q,
+      answer: '(failed to get an answer — network error)',
+      answeredAt: Date.now()
+    }
+  } finally {
+    btwBusy.value = false
+  }
+}
+
+/** User clicked Submit — deliver the selected/custom answer. */
+async function submitChoice() {
+  const cs = choiceState.value
+  if (!cs || choiceBusy.value || !canSubmitChoice.value) return
+  const answer = choiceSelected.value === CUSTOM_CHOICE_VALUE
+    ? choiceCustomText.value.trim()
+    : choiceSelected.value
+  choiceBusy.value = true
+  try {
+    await agentApi.respondUserChoice(cs.sessionId, answer, false)
+    // Don't close the modal here — the next poll sees the request is
+    // gone and clears it, keeping the UI in sync with the backend.
+  } catch { /* ignore — next poll will retry */ } finally {
+    choiceBusy.value = false
+  }
+}
+
+/** User clicked Cancel — tell the agent no option was picked. */
+async function cancelChoice() {
+  const cs = choiceState.value
+  if (!cs || choiceBusy.value) return
+  choiceBusy.value = true
+  try {
+    await agentApi.respondUserChoice(cs.sessionId, null, true)
+  } catch { /* ignore */ } finally {
+    choiceBusy.value = false
+  }
+}
+
+/**
+ * Global confirmation polling: the per-session poll only covers the
+ * session the user is viewing, so a top-level interval polls
+ * `/agent/pending-confirmations` (and the user-choice equivalent) to
+ * surface a modal for ANY session — e.g. when a sub-agent is the one
+ * blocked on confirmation.
+ */
+let globalConfirmationPollInterval: number | null = null
+const GLOBAL_CONFIRMATION_POLL_MS = 3000
+
+/**
+ * Opens a modal for the oldest pending request if none is showing,
+ * and closes the open modal once the backend no longer reports its
+ * request (responded elsewhere / timed out).
+ */
+async function refreshGlobalPendingConfirmations() {
+  try {
+    // Fetch both human-in-the-loop queues in parallel.
+    const [confRes, choiceRes] = await Promise.all([
+      agentApi.listPendingConfirmations(),
+      agentApi.listPendingUserChoices()
+    ])
+    const pendingConfs = confRes.data.pending || {}
+    const pendingChoices = choiceRes.data.pending || {}
+
+    // Close stale modals: if the backend no longer reports the request
+    // the open modal is showing (responded elsewhere / timed out), clear
+    // it. Covers modals opened for a DIFFERENT session than the active
+    // one — the per-session poll can't see those, so without this check
+    // they would stay up forever.
+    if (confirmationState.value && !(confirmationState.value.sessionId in pendingConfs)) {
+      confirmationState.value = null
+    }
+    if (choiceState.value && !(choiceState.value.sessionId in pendingChoices)) {
+      choiceState.value = null
+    }
+    // One modal at a time.
+    if (confirmationState.value || choiceState.value) return
+
+    // Pick the oldest entry across BOTH queues so the user answers the
+    // longest-waiting request first. Plain loop instead of `minBy`
+    // (not in TypeScript's ES2024 lib).
+    const confEntries = Object.entries(pendingConfs)
+    const choiceEntries = Object.entries(pendingChoices)
+    let oldestConf: [string, PendingConfirmation] | null = null
+    for (const entry of confEntries) {
+      if (!oldestConf || entry[1].createdAt < oldestConf[1].createdAt) oldestConf = entry
+    }
+    let oldestChoice: [string, PendingUserChoice] | null = null
+    for (const entry of choiceEntries) {
+      if (!oldestChoice || entry[1].createdAt < oldestChoice[1].createdAt) oldestChoice = entry
+    }
+    if (oldestConf && (!oldestChoice || oldestConf[1].createdAt <= oldestChoice[1].createdAt)) {
+      const [sessionId, pc] = oldestConf
+      if (sessionId && pc) confirmationState.value = { ...pc, sessionId }
+    } else if (oldestChoice) {
+      const [sessionId, puc] = oldestChoice
+      if (sessionId && puc) openChoiceModal(sessionId, puc)
+    }
+  } catch { /* ignore — next tick will retry */ }
+}
+
+function startGlobalConfirmationPolling() {
+  stopGlobalConfirmationPolling()
+  // Tick once immediately so we don't wait a full interval on mount.
+  refreshGlobalPendingConfirmations()
+  globalConfirmationPollInterval = window.setInterval(
+    refreshGlobalPendingConfirmations,
+    GLOBAL_CONFIRMATION_POLL_MS
+  )
+}
+
+function stopGlobalConfirmationPolling() {
+  if (globalConfirmationPollInterval != null) {
+    clearInterval(globalConfirmationPollInterval)
+    globalConfirmationPollInterval = null
+  }
+}
+
 /** User clicked Approve — deliver the decision to the backend. */
 async function approveConfirmation() {
   const cs = confirmationState.value
@@ -1820,14 +2284,19 @@ async function selectSession(id: string) {
   messages.value = []
   selectedWakeIndex.value = -1
   tokenUsage.value = null
-  // Clear any stale confirmation modal from the previous session.
+  // Clear any stale confirmation / choice modal from the previous session.
   confirmationState.value = null
+  choiceState.value = null
   loadingMessages.value = true
   // Stop previous polling
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
   // Restart the per-session status poll so the chat-header pill
   // follows the new active session.
   stopStatusPolling()
+  // Start the streaming-chunk poll IMMEDIATELY: it also clears the
+  // previous session's streaming bubble, which must not linger while
+  // the (potentially slow) getMessages below is in flight.
+  startStreamPolling(id)
 
   // Set model name from session info. If the session isn't in the list
   // (e.g. a sub-agent opened from the tree), fall back to a global
@@ -1868,12 +2337,16 @@ async function selectSession(id: string) {
 
   try {
     const { data } = await agentApi.getMessages(id)
+    // Discard the result if the user switched sessions again while
+    // this (potentially slow) fetch was in flight.
+    if (activeSessionId.value !== id) return
     messages.value = data.messages || []
     roundInputTokens.value = data.totalInputTokens ?? 0
     roundOutputTokens.value = data.totalOutputTokens ?? 0
     totalTokens.value = roundInputTokens.value + roundOutputTokens.value
     lastInputTokens.value = data.lastInputTokens ?? null
     contextLength.value = data.contextLength ?? null
+    contextLengthObserved.value = data.contextLengthObserved ?? false
     await scrollToBottom()
     // Start auto-polling while this session is active
     startMessagePolling()
@@ -2100,6 +2573,329 @@ function isLLMRetryStatusMessage(m: AgentMessage): boolean {
     (m.content ?? '').startsWith(LLM_RETRY_STATUS_PREFIX)
 }
 
+// ============================================================
+//  Live streaming via incremental poll + typewriter animation
+// ============================================================
+//
+// The DB-based preview (`__llm_progress__` rows) can only deliver
+// an update every few seconds because it goes through the DB.  The
+// user explicitly asked for "natural per-token growth".  (An
+// earlier SSE transport died at the outer reverse proxy, which
+// kills `text/event-stream` connections — plain JSON GETs survive
+// every proxy, so the transport here is short polling instead.)
+//
+// While a session is selected we poll
+// `GET /api/agent/sessions/{id}/stream-chunks?since=N` once per
+// second; the worker publishes every LLM chunk to the server's
+// in-memory `StreamChunkBus` history, which this endpoint drains.
+// Returned deltas are appended to [targetText]; a typewriter timer
+// then grows [streamingText] character by character towards
+// [targetText], so the user sees the response literally typing
+// itself out even though the transport is batched once per second.
+//
+// When the worker emits `done`, we stop polling and refresh
+// messages from the DB so the final assistant row (with full
+// markdown rendering, tool calls, etc.) replaces the plain-text
+// streaming bubble.
+const streamingText = ref('')
+const streamingChunkCount = ref(0)
+const streamingActive = ref(false)
+// Rendered-markdown view of [streamingText], refreshed on a
+// throttle so the typewriter's 40 ms ticks don't each pay for a
+// full markdown pass over a growing document.
+const streamingHtml = ref('')
+
+const STREAM_POLL_MS = 1000
+const TYPEWRITER_TICK_MS = 40
+const STREAM_RENDER_MS = 150
+// No new stream text for this long → show a "waiting for model"
+// stall spinner on the bubble (the backend only declares a stall
+// after 90 s; the UI should hint much earlier).
+const STREAM_STALL_HINT_MS = 10_000
+// Non-null while the latest generation ended INTERRUPTED (done +
+// error): the bubble keeps its partial content (dimmed) plus a
+// one-shot marker with this message.
+const streamInterruptedError = ref<string | null>(null)
+// True while the stream is alive but no new text has arrived for
+// STREAM_STALL_HINT_MS — drives the "waiting for model" spinner.
+const streamStalled = ref(false)
+let lastStreamChunkAt = 0
+
+let streamPollTimer: number | null = null
+let streamPollSession = ''
+let streamPollSince = 0
+let streamPollGeneration = -1 // -1 = not yet initialised
+let streamPollInFlight = false
+// Generation whose `done` we already handled.  The poll keeps
+// running after a generation finishes (so the NEXT generation is
+// picked up automatically), and the backend reports done=true on
+// every poll until then — this guard fires the finish handling
+// exactly once per generation.
+let streamFinishedGeneration = -1
+
+let targetText = ''
+let typewriterTimer: number | null = null
+
+function startStreamPolling(sessionId: string) {
+  // Always stop the previous poller — switching sessions must not
+  // leak chunks from the old session into the new one's bubble.
+  stopStreamPolling()
+  streamingText.value = ''
+  streamingHtml.value = ''
+  streamingThinkHtml.value = ''
+  streamThinkingActive.value = false
+  streamingChunkCount.value = 0
+  streamInterruptedError.value = null
+  streamStalled.value = false
+  lastStreamChunkAt = Date.now()
+  targetText = ''
+  streamPollSession = sessionId
+  streamPollSince = 0
+  streamPollGeneration = -1
+  streamFinishedGeneration = -1
+  streamingActive.value = true
+  // Immediate first poll so there's no 1-second dead time, then
+  // settle into the regular cadence.  The poll intentionally runs
+  // for as long as the session is selected — an idle poll costs an
+  // ~83-byte response per second, and keeping it alive is what lets
+  // the SECOND and later LLM generations appear without any
+  // additional wiring.
+  pollStreamChunksOnce()
+  streamPollTimer = window.setInterval(pollStreamChunksOnce, STREAM_POLL_MS)
+}
+
+function stopStreamPolling() {
+  if (streamPollTimer != null) {
+    window.clearInterval(streamPollTimer)
+    streamPollTimer = null
+  }
+  stopTypewriter()
+  streamStalled.value = false
+  streamInterruptedError.value = null
+  streamingActive.value = false
+}
+
+async function pollStreamChunksOnce() {
+  if (streamPollInFlight || !streamPollSession) return
+  streamPollInFlight = true
+  try {
+    const { data } = await agentApi.getStreamChunks(streamPollSession, streamPollSince)
+    const firstContact = streamPollGeneration === -1
+    if (!firstContact && data.generation !== streamPollGeneration) {
+      // A new LLM generation started — discard the old text (and
+      // any interrupted marker) and re-pull from zero on the next
+      // tick.
+      streamPollGeneration = data.generation
+      streamPollSince = 0
+      targetText = ''
+      streamingText.value = ''
+      streamingHtml.value = ''
+      streamingThinkHtml.value = ''
+      streamThinkingActive.value = false
+      streamingChunkCount.value = 0
+      streamInterruptedError.value = null
+      streamStalled.value = false
+      lastStreamChunkAt = Date.now()
+      return
+    }
+    streamPollGeneration = data.generation
+    if (firstContact && data.done && !data.error) {
+      // We selected a session whose current generation already
+      // FINISHED CLEANLY before we started watching (e.g. switching
+      // into an agent mid-run that then completed, or reopening a
+      // finished session).  Don't replay the stream — the canonical
+      // assistant row is already in the DB.  (An INTERRUPTED
+      // generation — done + error — falls through instead: its
+      // partial content exists ONLY in the stream history, so we
+      // render it and mark the bubble interrupted.)
+      streamFinishedGeneration = data.generation
+      streamPollSince = data.latestCount
+      refreshMessages()
+      return
+    }
+    let gotNewChunks = false
+    for (const chunk of data.chunks ?? []) {
+      if (chunk.chunkCount > streamPollSince) streamPollSince = chunk.chunkCount
+      if (chunk.delta) {
+        appendToTypewriter(chunk.delta)
+        gotNewChunks = true
+      }
+      if (chunk.chunkCount > 0) streamingChunkCount.value = chunk.chunkCount
+    }
+    // Stall indicator: the stream is alive (not done) but no new
+    // text has arrived for a while — the provider is thinking /
+    // being rescheduled.  Show a spinner so the user can tell this
+    // apart from a dead stream.  Cleared as soon as text resumes.
+    if (gotNewChunks) {
+      lastStreamChunkAt = Date.now()
+      streamStalled.value = false
+    } else if (!data.done && targetText !== '' &&
+               Date.now() - lastStreamChunkAt > STREAM_STALL_HINT_MS) {
+      streamStalled.value = true
+    }
+    // Terminal handling.  A generation ends in one of two ways:
+    //  - CLEAN (done, no error): swap the bubble for the canonical
+    //    DB row (finishStreaming clears it).
+    //  - INTERRUPTED (done + error, e.g. "streaming chat stalled"
+    //    when the provider silently drops mid-response): KEEP the
+    //    partial content on screen and show a one-shot interrupted
+    //    marker.  The marker is a separate element (NOT text
+    //    appended to the bubble), so the once-per-second poll can't
+    //    spam it the way inline "[stream error]" lines did.  When
+    //    the retry starts a new generation, the reset branch above
+    //    clears both the text and the marker.
+    if (data.done && data.generation !== streamFinishedGeneration) {
+      streamFinishedGeneration = data.generation
+      finishStreaming(data.error)
+    }
+  } catch {
+    // Transient failure (server restarting, etc.) — the next tick retries.
+  } finally {
+    streamPollInFlight = false
+  }
+}
+
+function finishStreaming(error?: string | null) {
+  const finishedSession = streamPollSession
+  // NOTE: the poll is NOT stopped here.  It keeps running so the
+  // next LLM generation (the agent's next turn) is picked up
+  // automatically — stopping it was the bug that made only the
+  // first message stream.
+  stopTypewriter()
+  streamStalled.value = false
+
+  if (error) {
+    // INTERRUPTED generation: keep the partial content on screen.
+    // The worker discarded its textBuffer (after persisting it to
+    // the DB as an __interrupted_partial__ row), so the stream
+    // history is the only place the user can watch the partial
+    // text until the 3 s message poll picks up the DB row.  Freeze
+    // the typewriter at the final text, render it, and flag the
+    // bubble as interrupted (dimmed background + one-shot marker).
+    // Do NOT clear anything and do NOT refreshMessages — there is
+    // no canonical row for this generation.
+    streamingText.value = targetText
+    renderStreamingNow()
+    streamInterruptedError.value = error
+    return
+  }
+
+  // CLEAN finish: swap the bubble for the canonical DB row.
+  streamInterruptedError.value = null
+  targetText = ''
+  streamingText.value = ''
+  streamingHtml.value = ''
+  streamingThinkHtml.value = ''
+  streamThinkingActive.value = false
+  streamingChunkCount.value = 0
+  // The worker writes the final assistant row to the DB around the
+  // same time it publishes the done chunk; give it a brief moment,
+  // then pull the canonical transcript so the user sees the final
+  // message (with tool calls, markdown, etc.) in place of the
+  // plain-text streaming bubble.  The regular 3 s message poll is
+  // the backstop if the row isn't committed yet.
+  window.setTimeout(() => {
+    if (activeSessionId.value === finishedSession) refreshMessages()
+  }, 600)
+}
+
+// ---- typewriter animation ----------------------------------------
+function appendToTypewriter(delta: string) {
+  targetText += delta
+  ensureTypewriter()
+}
+
+// ---- throttled markdown rendering of the streaming bubble ---------
+//
+// The bubble shows rendered markdown (bold, code, lists) rather
+// than raw text.  Rendering runs at most once per STREAM_RENDER_MS
+// — the typewriter adds characters every 40 ms and a full markdown
+// pass per tick would be wasted work; 150 ms still looks instant.
+// Incomplete syntax (an unclosed ** or ``` fence mid-stream)
+// renders best-effort, the same way the final message renders once
+// the stream completes.
+//
+// Reasoning-channel handling: models that emit <think>…</think>
+// blocks would otherwise have their whole chain-of-thought typed
+// out as ordinary body text (making responses look absurdly long).
+// When the stream STARTS with a think tag, the reasoning is split
+// into a collapsible "Thought process" window above the body:
+// expanded while the model is still thinking, auto-collapsed once
+// </think> arrives (the user can re-open it manually).
+const streamingThinkHtml = ref('')
+// True while the opening think tag has no closing tag yet.
+const streamThinkingActive = ref(false)
+
+let streamingRenderTimer: number | null = null
+
+/**
+ * Split a streaming text into its leading reasoning block and the
+ * visible body.  Returns { think, body, inProgress }:
+ *  - think:     text inside the leading <think>…</think> ('' if none)
+ *  - body:      everything after the closing tag ('' while unclosed)
+ *  - inProgress: think tag opened but not yet closed
+ */
+function splitThinkBlock(text: string): { think: string; body: string; inProgress: boolean } {
+  const open = /^\s*<\s*think(?:ing)?\s*[^>]*>/i.exec(text)
+  if (!open) return { think: '', body: text, inProgress: false }
+  const rest = text.slice(open[0].length)
+  const close = /<\s*\/\s*think(?:ing)?\s*>/i.exec(rest)
+  if (!close) return { think: rest, body: '', inProgress: true }
+  return {
+    think: rest.slice(0, close.index),
+    body: rest.slice(close.index + close[0].length),
+    inProgress: false,
+  }
+}
+
+function renderStreamingNow() {
+  const { think, body, inProgress } = splitThinkBlock(streamingText.value)
+  streamThinkingActive.value = inProgress
+  streamingThinkHtml.value = think ? renderMarkdown(think) : ''
+  streamingHtml.value = body ? renderMarkdown(body) : ''
+}
+
+function scheduleStreamingRender() {
+  if (streamingRenderTimer != null) return
+  streamingRenderTimer = window.setTimeout(() => {
+    streamingRenderTimer = null
+    renderStreamingNow()
+  }, STREAM_RENDER_MS)
+}
+
+function ensureTypewriter() {
+  if (typewriterTimer != null) return
+  typewriterTimer = window.setInterval(() => {
+    if (streamingText.value.length >= targetText.length) {
+      stopTypewriter()
+      return
+    }
+    // Catch-up jump: when we started watching a stream that was
+    // ALREADY well underway (e.g. the user switched into an agent
+    // mid-generation), replaying thousands of characters through the
+    // typewriter would take ages.  Jump to near the end and let only
+    // the tail type out, so the bubble still feels alive.
+    if (streamingText.value === '' && targetText.length > 200) {
+      streamingText.value = targetText.slice(0, targetText.length - 120)
+    }
+    // Catch up faster the further we lag behind so a large burst
+    // doesn't take forever, while a small burst still looks typed.
+    const lag = targetText.length - streamingText.value.length
+    const step = Math.max(1, Math.min(12, Math.floor(lag / 15)))
+    streamingText.value = targetText.slice(0, streamingText.value.length + step)
+    scheduleStreamingRender()
+    // Auto-scroll so the growing bubble stays in view.
+    scrollToBottom()
+  }, TYPEWRITER_TICK_MS)
+}
+
+function stopTypewriter() {
+  if (typewriterTimer != null) {
+    window.clearInterval(typewriterTimer)
+    typewriterTimer = null
+  }
+}
+
 function isLastVisibleMessage(m: AgentMessage): boolean {
   const msgs = visibleMessages.value
   return msgs.length > 0 && msgs[msgs.length - 1].messageId === m.messageId
@@ -2121,12 +2917,133 @@ function isLLMRetryRecovered(m: AgentMessage): boolean {
   return (m.content ?? '').includes('status=recovered')
 }
 
+// ============================================================
+//  LLM in-flight progress heartbeat
+// ============================================================
+//
+// The backend's `callLLM` writes a `__llm_progress__` system row
+// every 15 s while a single LLM call is running.  Without these,
+// long-form generations (60+ s) look identical to a frozen agent —
+// the user has no signal that work is still happening.
+//
+// We render only the LATEST heartbeat row; older ones are just
+// no-ops in the chat list.  The countdown ticks via the same
+// `nowTick` ref the LLM-retry banner uses, so the elapsed time
+// refreshes every second without extra polling.
+
+const LLM_PROGRESS_PREFIX = '__llm_progress__'
+
+function isLLMProgressMessage(m: AgentMessage): boolean {
+  return m.role === 'system' &&
+    (m.content ?? '').startsWith(LLM_PROGRESS_PREFIX)
+}
+
+/**
+ * Marker prefix the backend writes in front of the PARTIAL output
+ * of an interrupted LLM streaming call (provider stall / drop).
+ * The row uses role="assistant" so it stays in the LLM context —
+ * the retry reads it back and can build on the partial work.  The
+ * UI renders it with a dimmed background + an "interrupted
+ * partial" badge, and strips the prefix from the displayed text.
+ */
+const INTERRUPTED_PARTIAL_PREFIX = '__interrupted_partial__'
+
+function isInterruptedPartialMessage(m: AgentMessage): boolean {
+  return m.role === 'assistant' &&
+    (m.content ?? '').startsWith(INTERRUPTED_PARTIAL_PREFIX)
+}
+
+/** Message text with internal wire prefixes stripped for display. */
+function displayContent(m: AgentMessage): string {
+  const c = m.content ?? ''
+  return isInterruptedPartialMessage(m) ? c.slice(INTERRUPTED_PARTIAL_PREFIX.length) : c
+}
+
+/**
+ * Regeneration-instruction rows: internal directives telling the
+ * LLM to regenerate from scratch after an interrupted stream
+ * (prevents "seamless continuation" producing two unparseable
+ * halves of a tool_call).  They exist for the model, not the
+ * user — hidden from the chat like the progress heartbeats.
+ */
+const RETRY_INSTRUCTION_PREFIX = '__retry_instruction__'
+
+function isRetryInstructionMessage(m: AgentMessage): boolean {
+  return (m.content ?? '').startsWith(RETRY_INSTRUCTION_PREFIX)
+}
+
+function isLLMProgressDone(m: AgentMessage): boolean {
+  const c = m.content ?? ''
+  return c.includes('status=done') || c.includes('status=failed')
+}
+
+/**
+ * Latest non-done progress heartbeat across ALL messages, or null
+ * if no in-flight call is running.  The raw heartbeat rows are
+ * hidden from the chat (see [visibleMessages]); this drives the
+ * single compact in-flight indicator rendered above the streaming
+ * bubble.  Computed over `messages` (not the filtered visible
+ * list) so it keeps working now that the rows are hidden.
+ */
+const latestLLMProgress = computed<AgentMessage | null>(() => {
+  const msgs = messages.value
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (!isLLMProgressMessage(m)) continue
+    if (isLLMProgressDone(m)) return null   // burst finished
+    return m
+  }
+  return null
+})
+
+function llmProgressLabel(m: AgentMessage, _nowTick?: number): string {
+  const content = m.content ?? ''
+  if (isLLMProgressDone(m)) {
+    return content.includes('status=done')
+      ? 'LLM call finished.'
+      : 'LLM call failed.'
+  }
+  // Two formats exist on the wire:
+  //  - Heartbeat coroutine:  "elapsedMs=N status=in_flight"
+  //  - Streaming preview:    "status=in_flight chunkCount=N byteCount=K preview=..."
+  // Parse whichever is present.  Preview shows a trailing slice of the
+  // response being generated so the user sees progress in real time.
+  const elapsedMatch = content.match(/elapsedMs=(\d+)/)
+  const chunkMatch = content.match(/chunkCount=(\d+)/)
+  const byteMatch = content.match(/byteCount=(\d+)/)
+  const previewMatch = content.match(/preview=(.*)$/)
+
+  const parts: string[] = []
+  if (elapsedMatch) parts.push(`${formatDuration(parseInt(elapsedMatch[1]))} elapsed`)
+  if (chunkMatch) parts.push(`${chunkMatch[1]} chunks`)
+  if (byteMatch) parts.push(`${formatBytes(parseInt(byteMatch[1]))}`)
+  const head = parts.length > 0
+    ? `LLM is still working… (${parts.join(', ')})`
+    : 'LLM is still working…'
+
+  if (previewMatch && previewMatch[1].trim()) {
+    return `${head}\n▸ ${previewMatch[1].trim()}`
+  }
+  return head
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function llmRetryLabel(m: AgentMessage, _nowTick?: number): string {
   const content = m.content ?? ''
   if (isLLMRetryRecovered(m)) {
     const match = content.match(/retry=(\d+)/)
     const n = match ? match[1] : '?'
     return `LLM connection recovered after retry #${n}.`
+  }
+  // Context-overflow emergency compaction marker (written by the retry
+  // loop after 2 consecutive context-length rejections).
+  if (content.includes('action=context-compacted')) {
+    return 'Context length exceeded — compacted the conversation context, retrying…'
   }
   // Parse retry count and backoff
   const retryMatch = content.match(/retry=(\d+)/)
@@ -2212,22 +3129,35 @@ const wakeSegments = computed(() => {
  * with the wake-event separator for context.
  */
 const visibleMessages = computed(() => {
-  if (selectedWakeIndex.value === -1) return messages.value
-  const seg = wakeSegments.value[selectedWakeIndex.value]
-  if (!seg) return messages.value
-  // Include exactly this segment's wake-event marker plus all messages in
-  // the segment. Do NOT match wake markers by label: labels are often
-  // duplicated across cycles (e.g. repeated "Woken by system"), which made
-  // older/later wake separators appear in the wrong filtered view.
-  return messages.value.filter(m => seg.messageIds.has(m.messageId))
+  // `__llm_progress__` heartbeat rows are internal debug signals:
+  // they exist so the backend can prove an LLM call is alive, but
+  // as chat bubbles they are noise (one row per 15 s, raw key=value
+  // text).  The streaming bubble + the compact in-flight indicator
+  // above it carry the same information in a readable form, so the
+  // raw rows are filtered out of the chat entirely.
+  const base = selectedWakeIndex.value === -1
+    ? messages.value
+    : (() => {
+        const seg = wakeSegments.value[selectedWakeIndex.value]
+        if (!seg) return messages.value
+        // Include exactly this segment's wake-event marker plus all messages in
+        // the segment. Do NOT match wake markers by label: labels are often
+        // duplicated across cycles (e.g. repeated "Woken by system"), which made
+        // older/later wake separators appear in the wrong filtered view.
+        return messages.value.filter(m => seg.messageIds.has(m.messageId))
+      })()
+  return base.filter(m => !isLLMProgressMessage(m) && !isRetryInstructionMessage(m))
 })
 
 // Start/stop the 1-second tick timer based on whether the latest
-// visible message is an active (non-recovered) LLM retry notice.
-// This drives the countdown text without polling the server faster.
-watch(visibleMessages, (msgs) => {
+// visible message is an active (non-recovered) LLM retry notice OR
+// an in-flight LLM progress heartbeat.  This drives the countdown
+// text for both without polling the server faster.
+watch([visibleMessages, latestLLMProgress], ([msgs, latestProgress]) => {
   const last = msgs[msgs.length - 1]
-  const need = !!last && isLLMRetryStatusMessage(last) && !isLLMRetryRecovered(last)
+  const needRetry = !!last && isLLMRetryStatusMessage(last) && !isLLMRetryRecovered(last)
+  const needProgress = latestProgress != null
+  const need = needRetry || needProgress
   if (need && !nowTickInterval) {
     nowTickInterval = window.setInterval(() => { nowTick.value = Date.now() }, 1000)
   } else if (!need && nowTickInterval) {
@@ -2449,8 +3379,7 @@ function shortId(id?: string | null): string {
 
 async function openChildSession(sessionId: string) {
   // The "Open child session transcript" button on a sub-agent tool
-  // message simply switches the active session. (Previously this also
-  // closed the dedicated tree modal; that modal no longer exists.)
+  // message simply switches the active session.
   await selectSession(sessionId)
 }
 
@@ -3486,6 +4415,164 @@ onUnmounted(() => {
   font-size: 16px;
   flex-shrink: 0;
 }
+
+/* LLM in-flight progress heartbeat.  Rendered while a single LLM
+   call is still generating — uses a calmer blue tone than the
+   retry banner's warning yellow so the user can tell "still
+   working" apart from "previous call failed, waiting to retry". */
+.llm-progress-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin: 6px 0;
+  background: #e3f2fd;
+  border: 1px solid #64b5f6;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1565c0;
+}
+
+/* Live streaming bubble — the in-flight LLM response rendered
+   token-by-token as SSE chunks arrive.  Visually matches a regular
+   assistant message but with a subtle "live" tint and a blinking
+   cursor at the end so the user instantly recognises it as the
+   still-growing reply. */
+.streaming-live {
+  border-left: 3px solid #42a5f5;
+  background: linear-gradient(to right, #f4f9ff 0%, #ffffff 60%);
+}
+.streaming-live-time {
+  color: #1976d2;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.streaming-live-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  line-height: 1.55;
+}
+/* Collapsible reasoning ("Thought process") window inside the
+   streaming bubble: muted look so the chain-of-thought is visually
+   distinct from the actual answer body. */
+.think-details {
+  margin: 0 0 8px;
+  padding: 10px 14px;
+  border: 1px solid #e3e0d5;
+  border-radius: 12px;
+  background: #fbfaf6;
+}
+.think-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a8577;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.think-summary::-webkit-details-marker {
+  display: none;
+}
+.think-summary::before {
+  content: '💭';
+  flex-shrink: 0;
+}
+.think-summary-spinner {
+  flex-shrink: 0;
+}
+.think-content {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #8a8577;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* Interrupted streaming bubble: dimmed amber background so the
+   preserved partial content is visually distinct from a live
+   stream, plus the one-shot marker row below it. */
+.msg.assistant.streaming-live.interrupted .content {
+  background: #fdf3e0;
+  color: #6b5d3f;
+}
+.streaming-interrupted {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+}
+.streaming-interrupted-icon {
+  flex-shrink: 0;
+}
+/* Stall indicator in the bubble header: a small spinning ring +
+   "waiting for model…" while no new text has arrived for a
+   while. */
+.stream-stall-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  color: #b45309;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.stream-stall-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fcd34d;
+  border-top-color: #b45309;
+  border-radius: 50%;
+  animation: stream-stall-spin 0.9s linear infinite;
+}
+@keyframes stream-stall-spin {
+  to { transform: rotate(360deg); }
+}
+/* Persisted interrupted-partial row from the DB: same dimmed
+   treatment as the live interrupted bubble. */
+.msg.assistant.interrupted-partial .content {
+  background: #fdf3e0;
+  color: #6b5d3f;
+}
+.interrupted-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.llm-progress-spinner {
+  font-size: 16px;
+  flex-shrink: 0;
+  display: inline-block;
+  animation: llm-progress-spin 2s linear infinite;
+}
+.llm-progress-text {
+  flex: 1;
+}
+@keyframes llm-progress-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 .llm-retry-text {
   flex: 1;
 }
@@ -3773,6 +4860,47 @@ onUnmounted(() => {
   white-space: pre-wrap;
   max-height: 150px;
   overflow-y: auto;
+}
+
+/* Connection-lost banner — shown when the pollers have lost
+   contact with the backend (e.g. daemon crashed, network down,
+   server dead).  Stays on screen until polling recovers, so the
+   user knows the apparent "frozen" UI is actually a connectivity
+   problem rather than a hung agent. */
+.connection-lost-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fff8e1;
+  color: #8d6e00;
+  padding: 10px 16px;
+  font-size: 13px;
+  border-top: 1px solid #ffecb3;
+  border-bottom: 1px solid #ffecb3;
+}
+.connection-lost-icon {
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.connection-lost-text {
+  flex: 1;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.connection-lost-retry {
+  flex-shrink: 0;
+  background: #8d6e00;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.connection-lost-retry:hover {
+  background: #6d5600;
 }
 
 /* Agent error banner — shown in the chat area when the active
@@ -4343,6 +5471,145 @@ onUnmounted(() => {
 }
 .confirm-approve:hover:not(:disabled) {
   filter: brightness(1.1);
+}
+
+/* ---- User choice modal (ask_user_choice) ---- */
+.choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.choice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #313244);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.choice-option:hover {
+  border-color: var(--accent, #cba6f7);
+}
+.choice-option.selected {
+  border-color: var(--accent, #cba6f7);
+  background: var(--bg-accent, #181825);
+}
+.choice-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--accent, #cba6f7);
+}
+.choice-option-text {
+  font-size: 13px;
+  color: var(--text-primary, #cdd6f4);
+  word-break: break-word;
+}
+
+.choice-custom-input {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-accent, #181825);
+  border: 1px solid var(--border-color, #313244);
+  border-radius: 8px;
+  color: var(--text-primary, #cdd6f4);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.choice-custom-input:focus {
+  outline: none;
+  border-color: var(--accent, #cba6f7);
+}
+
+/* ---- BTW follow-up area (inside choice modal) ---- */
+.choice-btw {
+  margin-top: 16px;
+  border-top: 1px dashed var(--border-color, #313244);
+  padding-top: 12px;
+}
+
+.choice-btw-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.choice-btw-title {
+  font-size: 12px;
+  color: var(--text-secondary, #a6adc8);
+}
+.choice-countdown {
+  font-size: 11px;
+  color: var(--text-secondary, #a6adc8);
+  font-variant-numeric: tabular-nums;
+}
+
+.choice-btw-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.choice-btw-item {
+  background: var(--bg-accent, #181825);
+  border: 1px solid var(--border-color, #313244);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.choice-btw-q, .choice-btw-a {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  margin: 0;
+  color: var(--text-primary, #cdd6f4);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.choice-btw-a {
+  margin-top: 6px;
+  color: var(--text-secondary, #a6adc8);
+}
+.choice-btw-pending {
+  font-style: italic;
+}
+.choice-btw-tag {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-card, #1e1e2e);
+  border: 1px solid var(--border-color, #313244);
+  color: var(--accent, #cba6f7);
+}
+
+.choice-btw-input-row {
+  display: flex;
+  gap: 8px;
+}
+.choice-btw-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-accent, #181825);
+  border: 1px solid var(--border-color, #313244);
+  border-radius: 8px;
+  color: var(--text-primary, #cdd6f4);
+  font-size: 13px;
+  font-family: inherit;
+}
+.choice-btw-input:focus {
+  outline: none;
+  border-color: var(--accent, #cba6f7);
 }
 </style>
 
