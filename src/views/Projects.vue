@@ -58,6 +58,13 @@
               {{ workspaceExporting === project.name ? 'Exporting…' : 'Export Workspace' }}
             </button>
             <button
+              class="export-sessions-btn"
+              @click="openSessionExportModal(project.name)"
+              :disabled="sessionExporting === project.name"
+            >
+              {{ sessionExporting === project.name ? 'Exporting…' : 'Export Sessions' }}
+            </button>
+            <button
               class="delete-project-btn"
               @click="openDeleteModal(project.name)"
               :disabled="deleting === project.name"
@@ -291,6 +298,55 @@
       </div>
     </div>
 
+    <!-- Batch session export modal -->
+    <div v-if="sessionExportModal.show" class="modal-overlay" @click.self="closeSessionExportModal">
+      <div class="modal-content session-export-modal">
+        <div class="modal-header">
+          <h3>Export Sessions — {{ sessionExportModal.projectName }}</h3>
+          <button class="modal-close" @click="closeSessionExportModal">×</button>
+        </div>
+        <div class="session-export-body">
+          <div v-if="sessionExportModal.loading" class="status-checking">Loading sessions…</div>
+          <div v-else-if="sessionExportModal.error" class="status-error">{{ sessionExportModal.error }}</div>
+          <div v-else-if="sessionExportModal.sessions.length === 0" class="status-checking">
+            No agent sessions found for this project.
+          </div>
+          <template v-else>
+            <label class="session-row session-select-all">
+              <input
+                type="checkbox"
+                :checked="allSessionsSelected"
+                @change="toggleSelectAllSessions"
+              />
+              <span class="session-name">Select all ({{ sessionExportModal.sessions.length }})</span>
+            </label>
+            <div class="session-list">
+              <label v-for="s in sessionExportModal.sessions" :key="s.sessionId" class="session-row">
+                <input
+                  type="checkbox"
+                  :checked="sessionExportModal.selected.includes(s.sessionId)"
+                  @change="toggleSessionSelected(s.sessionId)"
+                />
+                <span class="session-name">{{ s.sessionName || s.sessionId.slice(0, 8) }}</span>
+                <span class="session-meta">{{ s.status }}</span>
+                <span class="session-meta">{{ s.createdAt?.slice(0, 16).replace('T', ' ') || '' }}</span>
+              </label>
+            </div>
+          </template>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="closeSessionExportModal" :disabled="sessionExportModal.exporting">Cancel</button>
+          <button
+            class="btn-primary"
+            @click="doSessionExport"
+            :disabled="sessionExportModal.exporting || sessionExportModal.selected.length === 0"
+          >
+            {{ sessionExportModal.exporting ? 'Exporting…' : `Export ${sessionExportModal.selected.length || ''} session(s)` }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Delete project confirmation modal -->
     <div v-if="deleteModal.show" class="modal-overlay" @click.self="closeDeleteModal">
       <div class="modal-content delete-modal">
@@ -350,9 +406,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { projectApi } from '@/services/api'
-import type { ExportTextStatus } from '@/services/api'
+import type { ExportTextStatus, ProjectSessionInfo } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
 
 const projects = ref<GhidraProjectInfo[]>([])
@@ -361,7 +417,19 @@ const error = ref<string | null>(null)
 const exporting = ref<string | null>(null)
 const textExporting = ref<string | null>(null)
 const workspaceExporting = ref<string | null>(null)
+const sessionExporting = ref<string | null>(null)
 const deleting = ref<string | null>(null)
+
+// --- Batch session export modal state ---
+const sessionExportModal = reactive({
+  show: false,
+  projectName: '',
+  loading: false,
+  error: null as string | null,
+  sessions: [] as ProjectSessionInfo[],
+  selected: [] as string[],
+  exporting: false,
+})
 
 // --- Delete project modal state ---
 const deleteModal = reactive({
@@ -581,6 +649,77 @@ async function doTextExport() {
   }
 }
 
+async function openSessionExportModal(name: string) {
+  sessionExporting.value = name
+  sessionExportModal.show = true
+  sessionExportModal.projectName = name
+  sessionExportModal.loading = true
+  sessionExportModal.error = null
+  sessionExportModal.sessions = []
+  sessionExportModal.selected = []
+  sessionExportModal.exporting = false
+  try {
+    const res = await projectApi.sessions(name)
+    sessionExportModal.sessions = res.data.sessions ?? []
+    // Default to everything selected — the common case is a full export.
+    sessionExportModal.selected = sessionExportModal.sessions.map(s => s.sessionId)
+  } catch (e: any) {
+    sessionExportModal.error = e.response?.data?.error ?? e.message ?? 'Failed to load sessions'
+  } finally {
+    sessionExportModal.loading = false
+  }
+}
+
+function closeSessionExportModal() {
+  if (sessionExportModal.exporting) return
+  sessionExportModal.show = false
+  sessionExportModal.projectName = ''
+  sessionExportModal.sessions = []
+  sessionExportModal.selected = []
+  sessionExporting.value = null
+}
+
+const allSessionsSelected = computed(() =>
+  sessionExportModal.sessions.length > 0 &&
+  sessionExportModal.selected.length === sessionExportModal.sessions.length
+)
+
+function toggleSelectAllSessions() {
+  sessionExportModal.selected = allSessionsSelected.value
+    ? []
+    : sessionExportModal.sessions.map(s => s.sessionId)
+}
+
+function toggleSessionSelected(id: string) {
+  const idx = sessionExportModal.selected.indexOf(id)
+  if (idx >= 0) sessionExportModal.selected.splice(idx, 1)
+  else sessionExportModal.selected.push(id)
+}
+
+async function doSessionExport() {
+  if (!sessionExportModal.projectName || sessionExportModal.selected.length === 0) return
+  sessionExportModal.exporting = true
+  try {
+    const res = await projectApi.exportSessions(sessionExportModal.projectName, sessionExportModal.selected)
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${sessionExportModal.projectName}-sessions.zip`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+    sessionExportModal.exporting = false
+    closeSessionExportModal()
+  } catch (e: any) {
+    const msg = e.response?.data?.error ?? e.message ?? 'Session export failed'
+    alert(`Session export failed: ${msg}`)
+  } finally {
+    sessionExportModal.exporting = false
+  }
+}
+
 function openDeleteModal(name: string) {
   deleteModal.show = true
   deleteModal.projectName = name
@@ -737,6 +876,66 @@ onMounted(fetchProjects)
 .export-btn:disabled, .export-text-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.export-sessions-btn {
+  padding: 4px 14px;
+  border: 1px solid #2e7d32;
+  border-radius: 4px;
+  background: #fff;
+  color: #2e7d32;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.export-sessions-btn:hover:not(:disabled) {
+  background: #2e7d32;
+  color: #fff;
+}
+.export-sessions-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- Batch session export --- */
+.session-export-modal {
+  width: 640px;
+}
+.session-export-body {
+  padding: 12px 24px;
+}
+.session-select-all {
+  font-weight: 600;
+  border-bottom: 1px solid #eaeaea;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+.session-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  cursor: pointer;
+  color: #333;
+}
+.session-row input {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.session-row .session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-row .session-meta {
+  color: #999;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* --- Modal --- */

@@ -104,6 +104,8 @@ export interface AgentSession {
   modelName: string | null
   projectName?: string | null
   moduleName?: string | null
+  /** Workflow run that spawned this session (null for interactive sessions). */
+  workflowId?: string | null
   createdAt: string | null
   updatedAt: string | null
   /**

@@ -139,6 +139,15 @@ export const agentApi = {
    */
   getSession: (sessionId: string) =>
     api.get<AgentSession>(`/agent/sessions/${sessionId}`),
+  /**
+   * Search top-level sessions by title and message content.  A
+   * sub-agent hit is reported as its root session, so results can be
+   * intersected directly with the top-level session list.
+   */
+  searchSessions: (query: string, limit = 50) =>
+    api.get<{ sessions: AgentSession[] }>('/agent/sessions/search', {
+      params: { q: query, limit }
+    }),
   listChildren: (parentSessionId: string) =>
     api.get<{ children: AgentSession[] }>(`/agent/sessions/${parentSessionId}/children`),
   createSession: (payload: {
@@ -154,10 +163,14 @@ export const agentApi = {
     api.post<AgentSession>('/agent/sessions', payload),
   getMessages: (sessionId: string) =>
     api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number; contextLengthObserved?: boolean }>(`/agent/sessions/${sessionId}/messages`),
-  chat: (sessionId: string, content: string, systemPrompt?: string) =>
+  chat: (sessionId: string, content: string, systemPrompt?: string, modelName?: string) =>
     api.post<ChatTurnResponse>(`/agent/sessions/${sessionId}/chat`, {
       content,
-      systemPrompt
+      systemPrompt,
+      // A non-empty modelName tells the backend to persist a manual
+      // model switch for this session (validated against the
+      // configured keys) before running the turn.
+      ...(modelName ? { modelName } : {})
     }),
   inject: (sessionId: string, message: string, transient: boolean = false) =>
     api.post<{ status: string; sessionId: string; transient: boolean; runtimeState: string; resumed: boolean; hint: string }>(
@@ -349,6 +362,12 @@ export const projectApi = {
     api.get<ExportTextStatus>(`/projects/${encodeURIComponent(name)}/export_text/status`),
   exportText: (name: string, options: ExportTextRequest) =>
     api.post(`/projects/${encodeURIComponent(name)}/export_text`, options, { responseType: 'blob' }),
+  /** List the agent sessions that worked on a project (batch-export dialog). */
+  sessions: (name: string) =>
+    api.get<{ sessions: ProjectSessionInfo[] }>(`/projects/${encodeURIComponent(name)}/sessions`),
+  /** Batch-export the selected sessions as a ZIP of tree-form Markdown transcripts. */
+  exportSessions: (name: string, sessionIds: string[]) =>
+    api.post(`/projects/${encodeURIComponent(name)}/export_sessions`, { sessionIds }, { responseType: 'blob' }),
   /**
    * Import a `.gar` (Ghidra Archive) as a standalone project. The backend
    * extracts the archive, registers every program in the binaries table
@@ -367,6 +386,14 @@ export const projectApi = {
     api.delete(`/projects/${encodeURIComponent(name)}`, {
       params: { deleteLogs, deleteAgentSessions, deleteWorkspace },
     }),
+}
+
+export interface ProjectSessionInfo {
+  sessionId: string
+  sessionName: string | null
+  status: string
+  modelName: string | null
+  createdAt: string | null
 }
 
 export interface ExportTextStatus {

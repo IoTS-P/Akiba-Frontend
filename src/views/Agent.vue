@@ -8,6 +8,41 @@
             {{ creatingSession ? '…' : '+ New' }}
           </button>
         </div>
+        <div class="session-filter">
+          <input
+            v-model="searchQuery"
+            class="session-filter-input"
+            type="text"
+            placeholder="Search title / content…"
+            @input="onSearchInput"
+          />
+          <FilterDropdown
+            v-model="projectFilter"
+            :options="projectOptions"
+            placeholder="Select project…"
+            @change="onProjectFilterChange"
+          />
+          <FilterDropdown
+            v-model="workflowFilter"
+            :options="workflowOptions"
+            placeholder="All workflows"
+            all-label="All workflows"
+            :disabled="projectFilter === null"
+            @change="onWorkflowFilterChange"
+          />
+          <FilterDropdown
+            v-model="moduleFilter"
+            :options="moduleOptions"
+            placeholder="All modules"
+            all-label="All modules"
+            :disabled="projectFilter === null"
+          />
+          <label class="session-filter-running" title="Show only session trees that contain a running agent (across all projects)">
+            <input type="checkbox" v-model="onlyRunningTrees" />
+            <span class="running-dot-inline" :class="{ active: onlyRunningTrees }"></span>
+            Running only
+          </label>
+        </div>
         <div class="session-hint muted small">
           Click ▸ on any session to reveal its sub-agents.
         </div>
@@ -19,11 +54,17 @@
           `.session-list-scroll` for the flex/overflow setup.
         -->
         <div class="session-list-scroll">
-          <div v-if="loadingSessions" class="muted small">Loading…</div>
-          <div v-else-if="sessions.length === 0" class="muted small">No sessions yet</div>
+          <div v-if="projectFilter === null && !searchActive && !onlyRunningTrees" class="muted small session-filter-hint">
+            Select a project above to view its agent sessions, or search across all sessions.
+          </div>
+          <div v-else-if="loadingSessions" class="muted small">Loading…</div>
+          <div v-else-if="searchingSessions" class="muted small">Searching…</div>
+          <div v-else-if="visibleSessions.length === 0" class="muted small session-filter-hint">
+            {{ searchActive ? 'No sessions match the search.' : (onlyRunningTrees ? 'No running session trees.' : 'No sessions match the current filter.') }}
+          </div>
           <ul v-else class="sessions">
             <SessionTreeItem
-              v-for="s in sessions"
+              v-for="s in visibleSessions"
               :key="s.sessionId"
               :session="s"
               :depth="0"
@@ -102,7 +143,7 @@
         <span class="session-list-toggle-icon">{{ sessionListOpen ? '◀' : '▶' }}</span>
         <span class="session-list-toggle-label">
           📋
-          <span v-if="sessions.length > 0" class="session-list-count">{{ sessions.length }}</span>
+          <span v-if="visibleSessions.length > 0" class="session-list-count">{{ visibleSessions.length }}</span>
         </span>
       </button>
     </aside>
@@ -380,7 +421,8 @@
                  spam it. -->
             <div v-if="streamInterruptedError" class="streaming-interrupted">
               <span class="streaming-interrupted-icon">⚠</span>
-              <span>Output interrupted ({{ streamInterruptedError }}). Partial content preserved — retrying…</span>
+              <span v-if="streamInterruptedIsCancel">Cancelled by user. Partial content preserved.</span>
+              <span v-else>Output interrupted ({{ streamInterruptedError }}). Partial content preserved — retrying…</span>
             </div>
           </div>
         </div>
@@ -834,6 +876,7 @@ import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, 
 import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
 import SessionTreeItem from '@/components/SessionTreeItem.vue'
+import FilterDropdown from '@/components/FilterDropdown.vue'
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
@@ -895,6 +938,212 @@ function findSessionById(id: string | null | undefined): AgentSession | undefine
   if (!id) return undefined
   return sessions.value.find(s => s.sessionId === id)
     ?? transientSessionsById.value[id]
+}
+
+// ---- Session filter (project → workflow → module) + search -----------------
+/**
+ * The session list is gated behind a project filter: with no project
+ * selected the list stays empty — sessions accumulate quickly and a
+ * flat list of every session is unusable.  The workflow and module
+ * selects progressively narrow the chosen project.  The search box
+ * searches session titles AND message contents (via the backend); a
+ * search with no project selected searches across all projects, which
+ * is the way to LOCATE a session whose project is unknown.
+ */
+const NO_PROJECT = '__no_project__'      // sessions with a null/blank projectName
+const NO_WORKFLOW = '__no_workflow__'    // interactive / legacy sessions (no workflowId)
+const NO_MODULE = '__no_module__'        // sessions with a null/blank moduleName
+
+const projectFilter = ref<string | null>(null)
+const workflowFilter = ref<string | null>(null)
+const moduleFilter = ref<string | null>(null)
+const searchQuery = ref('')
+/** Ids returned by the last backend search; null = not searching. */
+const searchMatchIds = ref<Set<string> | null>(null)
+const searchingSessions = ref(false)
+let searchDebounce: number | null = null
+
+/**
+ * Index of EVERY session (top-level and sub-agents) from the latest
+ * ALL-list poll, keyed by session id.  Powers the "running only"
+ * checkbox: a session tree qualifies when ANY of its members is in a
+ * non-terminal state.
+ */
+const allSessionsIndex = ref<Map<string, AgentSession>>(new Map())
+/** When checked, the list shows only session trees containing a running agent. */
+const onlyRunningTrees = ref(false)
+
+/** Walk the parent chain up to the tree's root (cycle-safe). */
+function rootIdOf(s: AgentSession, byId: Map<string, AgentSession>): string {
+  let cur = s
+  const seen = new Set<string>()
+  while (cur.parentSessionId) {
+    if (!seen.add(cur.sessionId)) break
+    const parent = byId.get(cur.parentSessionId)
+    if (!parent) break
+    cur = parent
+  }
+  return cur.sessionId
+}
+
+/** Root ids of session trees that contain at least one non-terminal member. */
+const runningRootIds = computed<Set<string>>(() => {
+  const roots = new Set<string>()
+  // Top-level rows may be fresher than the last ALL poll — check them too.
+  for (const s of sessions.value) {
+    if (!isTerminalStatus(s.status)) roots.add(s.sessionId)
+  }
+  const byId = allSessionsIndex.value
+  for (const s of byId.values()) {
+    if (isTerminalStatus(s.status)) continue
+    roots.add(rootIdOf(s, byId))
+  }
+  return roots
+})
+
+const searchActive = computed(() => searchMatchIds.value !== null)
+
+function projectKeyOf(s: AgentSession): string {
+  const v = s.projectName?.trim()
+  return v ? v : NO_PROJECT
+}
+function workflowKeyOf(s: AgentSession): string {
+  const v = s.workflowId?.trim()
+  return v ? v : NO_WORKFLOW
+}
+function moduleKeyOf(s: AgentSession): string {
+  const v = s.moduleName?.trim()
+  return v ? v : NO_MODULE
+}
+
+interface FilterOption {
+  value: string
+  label: string
+  count?: number
+  /** True when any session in this group is in a non-terminal state. */
+  running?: boolean
+}
+
+/** Accumulate per-group session counts and running flags for the dropdowns. */
+function groupOptions(
+  list: AgentSession[],
+  keyOf: (s: AgentSession) => string,
+  labelOf: (key: string) => string
+): FilterOption[] {
+  const groups = new Map<string, { n: number; running: boolean }>()
+  for (const s of list) {
+    const k = keyOf(s)
+    const g = groups.get(k) ?? { n: 0, running: false }
+    g.n++
+    if (!isTerminalStatus(s.status)) g.running = true
+    groups.set(k, g)
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([value, g]) => ({
+      value,
+      label: labelOf(value),
+      count: g.n,
+      running: g.running
+    }))
+}
+
+const projectOptions = computed<FilterOption[]>(() =>
+  groupOptions(
+    sessions.value,
+    projectKeyOf,
+    v => (v === NO_PROJECT ? '(no project)' : v)
+  )
+)
+
+/** Sessions passing the project filter, and optionally the workflow filter. */
+function sessionsUpTo(level: 'project' | 'workflow'): AgentSession[] {
+  return sessions.value.filter(s => {
+    if (projectFilter.value !== null && projectKeyOf(s) !== projectFilter.value) return false
+    if (level === 'workflow' &&
+        workflowFilter.value !== null && workflowKeyOf(s) !== workflowFilter.value) return false
+    return true
+  })
+}
+
+const workflowOptions = computed<FilterOption[]>(() =>
+  projectFilter.value === null
+    ? []
+    : groupOptions(
+        sessionsUpTo('project'),
+        workflowKeyOf,
+        v => (v === NO_WORKFLOW ? '(no workflow)' : `wf-${v.slice(0, 8)}`)
+      )
+)
+
+const moduleOptions = computed<FilterOption[]>(() =>
+  projectFilter.value === null
+    ? []
+    : groupOptions(
+        sessionsUpTo('workflow'),
+        moduleKeyOf,
+        v => (v === NO_MODULE ? '(unknown module)' : v)
+      )
+)
+
+const visibleSessions = computed<AgentSession[]>(() => {
+  // Searching overrides the project gate: its purpose is precisely to
+  // locate a session when the user does not know which project holds it.
+  if (searchActive.value) {
+    const ids = searchMatchIds.value!
+    return sessions.value.filter(s => ids.has(s.sessionId))
+  }
+  // "Running only" is a global quick view (like search): it bypasses
+  // the project gate so all live trees surface in one place.
+  if (onlyRunningTrees.value) {
+    return sessions.value.filter(s => runningRootIds.value.has(s.sessionId))
+  }
+  if (projectFilter.value === null) return []
+  return sessionsUpTo('workflow').filter(s =>
+    moduleFilter.value === null || moduleKeyOf(s) === moduleFilter.value)
+})
+
+function onProjectFilterChange() {
+  workflowFilter.value = null
+  moduleFilter.value = null
+  const first = visibleSessions.value[0]
+  if (first) selectSession(first.sessionId)
+}
+
+function onWorkflowFilterChange() {
+  moduleFilter.value = null
+}
+
+function onSearchInput() {
+  if (searchDebounce !== null) { clearTimeout(searchDebounce); searchDebounce = null }
+  const q = searchQuery.value.trim()
+  if (q.length < 2) {
+    searchMatchIds.value = null
+    return
+  }
+  searchDebounce = window.setTimeout(() => { void runSearch(q) }, 400)
+}
+
+async function runSearch(q: string) {
+  searchingSessions.value = true
+  try {
+    const { data } = await agentApi.searchSessions(q)
+    searchMatchIds.value = new Set((data.sessions || []).map(s => s.sessionId))
+  } catch (e) {
+    // Fall back to client-side title/UUID matching when the backend
+    // search route is unavailable (e.g. an older daemon).
+    console.warn('Session search failed, falling back to title match:', e)
+    const needle = q.toLowerCase()
+    searchMatchIds.value = new Set(
+      sessions.value
+        .filter(s =>
+          (s.sessionName ?? '').toLowerCase().includes(needle) ||
+          s.sessionId.toLowerCase().includes(needle))
+        .map(s => s.sessionId)
+    )
+  } finally {
+    searchingSessions.value = false
+  }
 }
 
 const loadingSessions = ref(false)
@@ -1086,8 +1335,11 @@ onMounted(async () => {
   // Start the list-level status poll so the session list badges
   // stay in sync with the DB even when the user is not actively
   // switching sessions.  Slower cadence than the per-session
-  // poll (LIST_POLL_MS vs STATUS_POLL_MS).
+  // poll (LIST_POLL_MS vs STATUS_POLL_MS).  Kick one pass off
+  // immediately so the running-tree index is populated up-front
+  // instead of after the first poll interval.
   startListPolling()
+  void refreshAllStatuses()
 
   // Global confirmation poll: surfaces confirmations raised by ANY
   // session (e.g. a sub-agent), not just the one being viewed.
@@ -1103,6 +1355,8 @@ onMounted(async () => {
     // a sub-agent session).
     const found = findSessionById(presetSession)
     if (found) {
+      // Reveal the preset session inside the project-filtered list.
+      projectFilter.value = projectKeyOf(found)
       await selectSession(found.sessionId)
       return
     }
@@ -1119,6 +1373,9 @@ onMounted(async () => {
         updatedAt: null
       })
       activeSessionId.value = presetSession
+      // The stub row has no projectName — surface it via the
+      // "(no project)" bucket so it stays visible under the filter.
+      projectFilter.value = NO_PROJECT
       messages.value = data.messages || []
       await scrollToBottom()
       // The preset path skipped selectSession() so the per-session
@@ -1132,22 +1389,24 @@ onMounted(async () => {
       // the 3-second DB polling — the exact bug being fixed here.
       startStreamPolling(presetSession)
     } catch {
-      // Fallback to default
-      if (sessions.value.length > 0 && llmConfigs.value.length > 0) {
+      // Fallback: just initialise the LLM picker — no session is
+      // auto-selected until the user picks a project on the left.
+      if (llmConfigs.value.length > 0) {
         selectedLlmConfig.value = llmConfigs.value[0].id
         onLlmConfigChange()
-        await selectSession(sessions.value[0].sessionId)
       }
     }
-  } else if (sessions.value.length > 0 && llmConfigs.value.length > 0) {
+  } else if (llmConfigs.value.length > 0) {
+    // No deep link: initialise the LLM picker only.  The session list
+    // stays empty until a project is selected in the filter bar.
     selectedLlmConfig.value = llmConfigs.value[0].id
     onLlmConfigChange()
-    await selectSession(sessions.value[0].sessionId)
   }
 })
 
 onUnmounted(() => {
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
+  if (searchDebounce !== null) { clearTimeout(searchDebounce); searchDebounce = null }
   stopStatusPolling()
   stopListPolling()
   if (nowTickInterval) { clearInterval(nowTickInterval); nowTickInterval = null }
@@ -1185,6 +1444,26 @@ function onLlmConfigChange() {
     availableModels.value = config.modelNames
     selectedLlmModel.value = config.modelNames[0]
   }
+}
+
+/**
+ * Point the LLM picker at the model the given session is actually
+ * using.  Without this the picker stayed on the page default (first
+ * config / first model) when a session was reopened, making it look —
+ * and behave, once the user touched it — as if the session forgot its
+ * model between visits.  A model that no configured key covers (e.g.
+ * the key was deleted) leaves the picker untouched.
+ */
+function syncLlmPickerWithSession(modelName?: string | null) {
+  if (!modelName) return
+  const lower = modelName.toLowerCase()
+  const config = llmConfigs.value.find(c =>
+    c.modelNames.some(m => m.toLowerCase() === lower))
+  if (!config) return
+  selectedLlmConfig.value = config.id
+  availableModels.value = config.modelNames
+  selectedLlmModel.value =
+    config.modelNames.find(m => m.toLowerCase() === lower) ?? modelName
 }
 
 // ---- Sessions ---------------------------------------------------------------
@@ -1434,7 +1713,9 @@ const createButtonLabel = computed(() => {
 async function loadSessions() {
   loadingSessions.value = true
   try {
-    const { data } = await agentApi.listSessions()
+    // Fetch a generous page so the project/workflow/module filter
+    // dropdowns can be derived from the full top-level list.
+    const { data } = await agentApi.listSessions(500)
     sessions.value = data.sessions || []
     // Fresh page load → drop any sub-agent rows we were holding
     // for the previous session.  The next `selectSession` will
@@ -1566,6 +1847,13 @@ async function createSession() {
     }
     const { data } = await agentApi.createSession(payload)
     sessions.value.unshift(data)
+    // Reveal the fresh session under the filter view: select its
+    // project and clear the finer filters / any active search.
+    projectFilter.value = projectKeyOf(data)
+    workflowFilter.value = null
+    moduleFilter.value = null
+    searchQuery.value = ''
+    searchMatchIds.value = null
     showNewModal.value = false
     tokenUsage.value = null
     await selectSession(data.sessionId)
@@ -1651,6 +1939,17 @@ async function refreshMessages() {
       (nextMessages.length > 0 && messages.value.length > 0 &&
        nextMessages[nextMessages.length - 1].messageId !== messages.value[messages.value.length - 1].messageId)
     messages.value = nextMessages
+    // Keep an unacknowledged optimistic user bubble on screen until the
+    // DB transcript actually contains it.
+    const pending = pendingOptimistic
+    if (pending && pending.sessionId === polledSessionId) {
+      const arrived = nextMessages.some(m => m.role === 'user' && m.content === pending.msg.content)
+      if (arrived) {
+        pendingOptimistic = null
+      } else {
+        messages.value = [...nextMessages, pending.msg]
+      }
+    }
     // Use backend-provided token stats; update even when message text is unchanged.
     roundInputTokens.value = data.totalInputTokens ?? 0
     roundOutputTokens.value = data.totalOutputTokens ?? 0
@@ -1851,6 +2150,10 @@ async function refreshAllStatuses() {
   try {
     const { data } = await agentApi.listSessions(200, 0, 'ALL')
     const all = data.sessions || []
+    // Feed the running-tree index (the "running only" checkbox view).
+    // The daemon orders by updated_at DESC, so live (actively-updating)
+    // sessions always land in the first page even when it truncates.
+    allSessionsIndex.value = new Map(all.map(s => [s.sessionId, s]))
     // Build a map for O(1) status updates; new entries (e.g. a
     // child that just spawned) get inserted, vanished entries
     // are kept (the user may have them open in another tab).
@@ -2281,6 +2584,7 @@ function stopListPolling() {
 async function selectSession(id: string) {
   activeSessionId.value = id
   errorMsg.value = ''
+  pendingOptimistic = null
   messages.value = []
   selectedWakeIndex.value = -1
   tokenUsage.value = null
@@ -2334,6 +2638,10 @@ async function selectSession(id: string) {
     } catch { /* ignore */ }
   }
   sessionModelName.value = session?.modelName || ''
+  // The picker must reflect the session's own model — a session keeps
+  // using the same model across interruptions until the user
+  // deliberately switches it (which /chat then persists).
+  syncLlmPickerWithSession(session?.modelName)
 
   try {
     const { data } = await agentApi.getMessages(id)
@@ -2427,6 +2735,16 @@ async function deleteSession(id: string) {
   }
 }
 
+/**
+ * Optimistic user bubble awaiting DB confirmation.  The interactive
+ * /chat turn runs in a freshly-spawned worker JVM, so the real user
+ * row lands in agent_messages only several seconds after the request
+ * starts; the 750 ms message poll would otherwise replace the list
+ * without it and the bubble "flashes" out and back in.  refreshMessages
+ * re-appends this bubble until the fetched transcript contains it.
+ */
+let pendingOptimistic: { sessionId: string; msg: AgentMessage } | null = null
+
 async function sendMessage() {
   if (!activeSessionId.value || !input.value.trim() || sending.value) return
   const content = input.value
@@ -2452,6 +2770,12 @@ async function sendMessage() {
   }
   if (tempUser) {
     messages.value.push(tempUser)
+    // Track the bubble so periodic message polls keep it on screen
+    // until the DB transcript actually contains the user row (the
+    // manual-agent worker writes it only after its JVM + Ghidra boot,
+    // several seconds in) — without this the bubble vanishes for a
+    // few seconds right after sending.
+    pendingOptimistic = { sessionId: activeSessionId.value, msg: tempUser }
   }
   await scrollToBottom()
 
@@ -2474,17 +2798,45 @@ async function sendMessage() {
         startMessagePolling(ACTIVE_CHAT_POLL_MS)
       }
     } else {
-      // Manual chat session: synchronous /chat as before.
-      await agentApi.chat(activeSessionId.value, content)
+      // Manual chat session: synchronous /chat as before.  The
+      // currently-picked model is sent along so a deliberate switch
+      // is persisted server-side (the session otherwise keeps using
+      // its original model, no matter how often it was interrupted).
+      await agentApi.chat(
+        activeSessionId.value,
+        content,
+        undefined,
+        selectedLlmModel.value || undefined,
+      )
+      // Reflect a model switch locally right away — the header label
+      // and the session-list entry would otherwise show the old model
+      // until the next poll round-trip.
+      if (selectedLlmModel.value) {
+        sessionModelName.value = selectedLlmModel.value
+        const entry = findSessionById(activeSessionId.value)
+        if (entry) entry.modelName = selectedLlmModel.value
+      }
     }
     // Reload all messages from server to capture tool calls too
     await refreshMessages()
   } catch (e: any) {
-    if (tempUser) {
-      messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
+    if (e?.response?.status === 504) {
+      // The reverse proxy timed out the synchronous /chat request,
+      // but the agent worker keeps running server-side and persists
+      // its output as it goes.  Do NOT drop the optimistic bubble or
+      // restore the draft (the message was accepted — restoring it
+      // invites a duplicate send); tell the user the turn is still
+      // running and let the pollers pick up the output.
+      errorMsg.value =
+        'The agent is taking longer than the proxy timeout — the turn is still running and its output will appear automatically.'
+    } else {
+      if (tempUser) {
+        messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
+      }
+      pendingOptimistic = null
+      errorMsg.value = e?.response?.data?.error || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
+      input.value = content
     }
-    errorMsg.value = e?.response?.data?.error || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
-    input.value = content
   } finally {
     sending.value = false
     startMessagePolling()
@@ -2619,6 +2971,11 @@ const streamInterruptedError = ref<string | null>(null)
 // True while the stream is alive but no new text has arrived for
 // STREAM_STALL_HINT_MS — drives the "waiting for model" spinner.
 const streamStalled = ref(false)
+// The backend labels a user-cancelled generation "cancelled by user";
+// render a calm marker for it instead of the generic interruption
+// error (which also promises a retry that will never come).
+const streamInterruptedIsCancel = computed(() =>
+  (streamInterruptedError.value ?? '').toLowerCase().includes('cancelled by user'))
 let lastStreamChunkAt = 0
 
 let streamPollTimer: number | null = null
@@ -2780,23 +3137,40 @@ function finishStreaming(error?: string | null) {
     return
   }
 
-  // CLEAN finish: swap the bubble for the canonical DB row.
+  // CLEAN finish: flush the COMPLETE text into the bubble first, then
+  // swap it for the canonical DB row only once a refresh actually
+  // contains a newer assistant row.  (Previously the bubble was
+  // cleared immediately: whatever the typewriter had not typed yet
+  // vanished, and the row appeared up to a poll later — the final
+  // answer looked truncated and then jumped.)
   streamInterruptedError.value = null
+  const finalText = targetText
+  const lastRowIdBefore = messages.value[messages.value.length - 1]?.messageId
   targetText = ''
-  streamingText.value = ''
-  streamingHtml.value = ''
-  streamingThinkHtml.value = ''
-  streamThinkingActive.value = false
   streamingChunkCount.value = 0
-  // The worker writes the final assistant row to the DB around the
-  // same time it publishes the done chunk; give it a brief moment,
-  // then pull the canonical transcript so the user sees the final
-  // message (with tool calls, markdown, etc.) in place of the
-  // plain-text streaming bubble.  The regular 3 s message poll is
-  // the backstop if the row isn't committed yet.
-  window.setTimeout(() => {
-    if (activeSessionId.value === finishedSession) refreshMessages()
-  }, 600)
+  streamingText.value = finalText
+  renderStreamingNow()
+  let attempts = 0
+  const swapTimer = window.setInterval(async () => {
+    // Abort if the user switched sessions or a newer generation has
+    // already taken over the bubble.
+    if (activeSessionId.value !== finishedSession ||
+        streamingText.value !== finalText) {
+      window.clearInterval(swapTimer)
+      return
+    }
+    attempts++
+    await refreshMessages()
+    const last = messages.value[messages.value.length - 1]
+    const rowArrived = last?.role === 'assistant' && last.messageId !== lastRowIdBefore
+    if (rowArrived || attempts >= 10) {
+      window.clearInterval(swapTimer)
+      streamingText.value = ''
+      streamingHtml.value = ''
+      streamingThinkHtml.value = ''
+      streamThinkingActive.value = false
+    }
+  }, 300)
 }
 
 // ---- typewriter animation ----------------------------------------
@@ -5222,6 +5596,63 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 11px;
   line-height: 1.4;
+}
+
+/* ---- Session filter (project / workflow / module + search) --------------- */
+.session-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.session-filter-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 5px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--text, #374151);
+  box-sizing: border-box;
+}
+.session-filter-input:focus {
+  outline: none;
+  border-color: var(--primary, #4f46e5);
+}
+.session-filter-hint {
+  padding: 12px 8px;
+  line-height: 1.5;
+}
+.session-filter-running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text, #374151);
+  cursor: pointer;
+  user-select: none;
+}
+.session-filter-running input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+/* Static dot that lights up (pulses) while the checkbox is on. */
+.running-dot-inline {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+  flex-shrink: 0;
+}
+.running-dot-inline.active {
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  animation: running-pulse 1.6s ease-out infinite;
+}
+@keyframes running-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
 }
 
 /* ---- Chat header --------------------------------------------------------- */
