@@ -47,6 +47,10 @@
           <span class="icon">⚙️</span>
           <span>Settings</span>
         </router-link>
+        <router-link v-if="authStore.isAdmin" to="/admin/users" class="nav-item">
+          <span class="icon">👥</span>
+          <span>Users</span>
+        </router-link>
       </nav>
       <div class="sidebar-footer">
         <div class="instance-info">

@@ -3,6 +3,9 @@ import type {
   AuthResponse,
   MessageResponse,
   InstanceResponse,
+  InstanceSummary,
+  BackupSummary,
+  AdminUserEntry,
   Script,
   ScriptExecution,
   ScriptRunResponse,
@@ -44,7 +47,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // A rejected sign-in is *not* an expired session. Bouncing it through
+    // `window.location.href` reloaded the login page before the server's message
+    // — wrong credentials, or "account locked" — could be displayed, which also
+    // made failed attempts look instantaneous. The login view renders the error
+    // itself, so only other endpoints redirect here.
+    const url: string = error.config?.url || ''
+    const isSignInEndpoint = url.includes('/auth/login') || url.includes('/auth/setup')
+    if (error.response?.status === 401 && !isSignInEndpoint) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'
@@ -54,19 +64,50 @@ api.interceptors.response.use(
 )
 
 export const authApi = {
-  register: (username: string, password: string) =>
-    api.post<AuthResponse>('/auth/register', { username, password }),
+  /**
+   * Whether the deployment still needs its first administrator. The login page
+   * shows the setup form instead of the login form while this is true.
+   */
+  setupStatus: () =>
+    api.post<{ needsSetup: boolean; userCount: number }>('/auth/setup-status'),
+  /** Create the first administrator. Server-side only allowed while no user exists. */
+  setup: (username: string, password: string) =>
+    api.post<AuthResponse>('/auth/setup', { username, password }),
   login: (username: string, password: string) =>
     api.post<AuthResponse>('/auth/login', { username, password }),
   logout: () => api.post<MessageResponse>('/auth/logout'),
   me: () => api.get<AuthResponse>('/auth/me')
 }
 
+export const adminApi = {
+  listUsers: () =>
+    api.get<{ users: AdminUserEntry[] }>('/admin/users'),
+  createUser: (username: string, password: string, isAdmin = false) =>
+    api.post<AdminUserEntry>('/admin/users', { username, password, isAdmin }),
+  deleteUser: (id: number) =>
+    api.delete<MessageResponse>(`/admin/users/${id}`),
+  resetPassword: (id: number, password: string) =>
+    api.post<MessageResponse>(`/admin/users/${id}/password`, { password }),
+  /**
+   * Lift a brute-force lock. Accounts lock themselves for a day after five
+   * consecutive failures (the server also waits three seconds before answering a
+   * rejected sign-in), so this is the way back in before the lock expires.
+   */
+  unlockUser: (id: number) =>
+    api.post<MessageResponse>(`/admin/users/${id}/unlock`)
+}
+
 export const instanceApi = {
-  list: (probe?: string) =>
-    api.get<{ instances: string[]; hint?: string }>('/instances', {
-      params: probe ? { probe } : undefined
-    }),
+  /**
+   * Instances owned by the signed-in user (the daemon is authoritative).
+   *
+   * `backupInProgress` names the instances with a backup/restore running right
+   * now, so "Back up" can be disabled instead of being clicked into a refusal.
+   */
+  list: () =>
+    api.get<{ instances: InstanceSummary[]; username?: string; backupInProgress?: string[] }>(
+      '/instances'
+    ),
   create: (name: string) => api.post<InstanceResponse>('/instances/create', { name }),
   delete: (instanceName: string) =>
     api.post<InstanceResponse>('/instances/delete', { instanceName }),
@@ -74,8 +115,24 @@ export const instanceApi = {
     api.post<InstanceResponse>('/instances/start', { instanceName }),
   shutdown: (instanceName: string) =>
     api.post<InstanceResponse>('/instances/shutdown', { instanceName }),
-  backup: (instanceName: string) =>
-    api.post<{ message: string }>('/instances/backup', { instanceName })
+  backup: (payload: { instanceName: string; alias?: string; description?: string; isFull?: boolean }) =>
+    api.post<{ message: string; label?: string }>('/instances/backup', payload),
+  /**
+   * Backups available for an instance, newest state included.
+   *
+   * `busy` is true while a backup/restore of that instance is running — the UI
+   * keeps "Back up" disabled until it clears.
+   */
+  backups: (instanceName: string) =>
+    api.get<{ instance: string; backups: BackupSummary[]; busy?: boolean }>('/instances/backups', {
+      params: { instance: instanceName }
+    }),
+  /**
+   * Restore an instance to a backup. `confirm` must be true: the server refuses
+   * an unacknowledged restore so a stray click cannot roll back data.
+   */
+  restore: (instanceName: string, backup: string, confirm = true) =>
+    api.post<{ message: string }>('/instances/restore', { instanceName, backup, confirm })
 }
 
 export const scriptApi = {

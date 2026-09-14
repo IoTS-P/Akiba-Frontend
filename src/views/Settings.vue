@@ -273,7 +273,6 @@
             <div class="form-row">
               <div class="form-group"><label>Server IP</label><input v-model="gui.sqlSource.serverIP" placeholder="127.0.0.1" /></div>
               <div class="form-group"><label>Server Port</label><input v-model.number="gui.sqlSource.serverPort" type="number" /></div>
-              <div class="form-group"><label>Snapshot</label><input v-model="gui.sqlSource.useSnapshot" placeholder="current" /></div>
             </div>
             <div class="form-row">
               <div class="form-group flex2"><label>Constraint (WHERE clause)</label><input v-model="gui.sqlSource.constraint" placeholder="WHERE original_path LIKE '%.elf'" /></div>
@@ -888,7 +887,6 @@ const gui = reactive({
   sqlSource: {
     serverIP: '127.0.0.1',
     serverPort: 31777,
-    useSnapshot: 'current',
     constraint: "WHERE original_path LIKE '%.elf'",
     disableUpdate: false,
     useLocalCache: '' as string
@@ -1044,7 +1042,7 @@ function guiToJson(): string {
   mainObj.withGhidraProject = gproj
 
   const sql = gui.sqlSource
-  const sqlObj: any = { serverIP: sql.serverIP, serverPort: sql.serverPort, useSnapshot: sql.useSnapshot}
+  const sqlObj: any = { serverIP: sql.serverIP, serverPort: sql.serverPort }
   if (sql.constraint) sqlObj.constraint = sql.constraint
   sqlObj.disableUpdate = sql.disableUpdate
   if (sql.useLocalCache) sqlObj.useLocalCache = sql.useLocalCache
@@ -1181,7 +1179,6 @@ function jsonToGui(json: string) {
     const sql = proc.sqlSource || {}
     gui.sqlSource.serverIP = sql.serverIP || '127.0.0.1'
     gui.sqlSource.serverPort = sql.serverPort || 31777
-    gui.sqlSource.useSnapshot = sql.useSnapshot || 'current'
     gui.sqlSource.constraint = sql.constraint || ''
     gui.sqlSource.disableUpdate = sql.disableUpdate || false
     gui.sqlSource.useLocalCache = sql.useLocalCache || ''
@@ -1261,7 +1258,7 @@ function newRuntimeConfig() {
   gui.ghidra.mode = 'new'
   gui.ghidra.forkTo = ''; gui.ghidra.forkOnTask = false; gui.ghidra.saveProject = true; gui.ghidra.noCreateProgram = false
   gui.ghidra.overwriteProject = false; gui.ghidra.deletePreviousProgram = false
-  gui.sqlSource.serverIP = '127.0.0.1'; gui.sqlSource.serverPort = 31777; gui.sqlSource.useSnapshot = 'current'
+  gui.sqlSource.serverIP = '127.0.0.1'; gui.sqlSource.serverPort = 31777
   gui.sqlSource.constraint = "WHERE original_path LIKE '%.elf'"; gui.sqlSource.disableUpdate = false; gui.sqlSource.useLocalCache = ''
   gui.llm.provider = ''; gui.llm.modelName = ''; gui.llm.apiKeyEnv = ''; gui.llm.apiKey = ''; gui.llm.baseUrl = ''
   gui.llm.temperature = null; gui.llm.topP = null; gui.llm.maxTokens = null

@@ -147,6 +147,9 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { workflowApi, runtimeConfigApi, type RuntimeConfigEntry } from '@/services/api'
 import type { WorkflowStatus } from '@/types'
+import { useInstanceStore } from '@/stores/instance'
+
+const instanceStore = useInstanceStore()
 
 const PAGE_SIZE = 50
 
@@ -222,9 +225,15 @@ async function loadWorkflows() {
 
 async function startWorkflow() {
   if (!selectedRuntimeConfig.value) return
+  if (!instanceStore.selected) {
+    showMessage('Select an instance before starting a workflow', 'error')
+    return
+  }
   starting.value = true
   try {
-    const { data } = await workflowApi.start('akiba-instance', selectedRuntimeConfig.value, 1)
+    // The instance is whatever the user selected; there is no default instance
+    // compiled into the deployment any more.
+    const { data } = await workflowApi.start(instanceStore.selected, selectedRuntimeConfig.value, 1)
     showMessage('Workflow started', 'success')
     workflows.value.unshift({ id: data.workflowId, status: 'running', progress: 0, successCount: 0, failCount: 0 })
     activeTab.value = 'running'

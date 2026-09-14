@@ -2,6 +2,8 @@ export interface AuthResponse {
   token: string
   userId: number
   username: string
+  /** Administrators may manage users; the first account created is one. */
+  isAdmin?: boolean
 }
 
 export interface MessageResponse {
@@ -11,6 +13,39 @@ export interface MessageResponse {
 export interface InstanceResponse {
   message: string
   instanceName?: string
+}
+
+/** An instance owned by the signed-in user, as reported by the database daemon. */
+export interface InstanceSummary {
+  name: string
+  port?: number
+  running?: boolean
+  logicalPrior?: string | null
+}
+
+/** A backup that an instance can be restored to. */
+export interface BackupSummary {
+  label: string
+  alias?: string | null
+  description?: string | null
+  backupType?: string
+  createdAt?: string
+  isExpired?: boolean
+  parent?: string | null
+}
+
+/** A user account, as listed by the admin API. */
+export interface AdminUserEntry {
+  id: number
+  username: string
+  isAdmin: boolean
+  createdAt?: string
+  /** Consecutive failed sign-ins recorded for the account. */
+  failedLoginAttempts?: number
+  /** ISO-8601 instant until which the account is locked, or null. */
+  lockedUntil?: string | null
+  /** Whether the account is locked right now (brute-force protection). */
+  locked?: boolean
 }
 
 export interface Script {

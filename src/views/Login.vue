@@ -2,7 +2,14 @@
   <div class="login-page">
     <div class="login-card">
       <h1 class="title">Akiba</h1>
-      <p class="subtitle">Framework Dashboard</p>
+      <p class="subtitle">{{ isSetup ? 'Create the administrator account' : 'Framework Dashboard' }}</p>
+
+      <p v-if="isSetup" class="setup-hint">
+        This instance has no accounts yet. The account you create here is the
+        administrator and is the only one that can add further users — no
+        default credentials are shipped with Akiba.
+      </p>
+
       <form @submit.prevent="handleSubmit" class="form">
         <div class="form-group">
           <label>Username</label>
@@ -12,21 +19,21 @@
           <label>Password</label>
           <input v-model="password" type="password" placeholder="Enter password" required />
         </div>
+        <div v-if="isSetup" class="form-group">
+          <label>Confirm password</label>
+          <input v-model="confirm" type="password" placeholder="Repeat password" required />
+        </div>
         <div v-if="error" class="error">{{ error }}</div>
         <button type="submit" class="btn" :disabled="loading">
-          {{ isRegister ? 'Register' : 'Login' }}
+          {{ loading ? 'Please wait…' : (isSetup ? 'Create administrator' : 'Login') }}
         </button>
       </form>
-      <p class="toggle">
-        {{ isRegister ? 'Already have an account?' : "Don't have an account?" }}
-        <a @click="toggleMode" href="#">{{ isRegister ? 'Login' : 'Register' }}</a>
-      </p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -35,30 +42,44 @@ const authStore = useAuthStore()
 
 const username = ref('')
 const password = ref('')
-const isRegister = ref(false)
+const confirm = ref('')
+const isSetup = ref(false)
 const loading = ref(false)
 const error = ref('')
+
+onMounted(async () => {
+  // Ask the server whether this deployment still needs its first account. There
+  // is no self-registration any more: either you set up the first administrator
+  // here, or an administrator creates your account in the admin page.
+  isSetup.value = await authStore.checkSetupStatus()
+})
 
 async function handleSubmit() {
   loading.value = true
   error.value = ''
   try {
-    if (isRegister.value) {
-      await authStore.register(username.value, password.value)
+    if (isSetup.value) {
+      if (password.value !== confirm.value) {
+        error.value = 'Passwords do not match'
+        return
+      }
+      if (password.value.length < 6) {
+        error.value = 'Password must be at least 6 characters'
+        return
+      }
+      await authStore.setup(username.value, password.value)
     } else {
       await authStore.login(username.value, password.value)
     }
     router.push('/')
   } catch (e: any) {
-    error.value = e.response?.data?.message || 'Authentication failed'
+    error.value =
+      e.response?.data?.message ||
+      e.response?.data?.error ||
+      (isSetup.value ? 'Setup failed' : 'Authentication failed')
   } finally {
     loading.value = false
   }
-}
-
-function toggleMode() {
-  isRegister.value = !isRegister.value
-  error.value = ''
 }
 </script>
 
@@ -90,6 +111,17 @@ function toggleMode() {
   text-align: center;
   color: #666;
   margin-bottom: 30px;
+}
+
+.setup-hint {
+  font-size: 13px;
+  color: #555;
+  background: #fff5f7;
+  border-left: 3px solid #e94560;
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin: -18px 0 22px;
+  line-height: 1.5;
 }
 
 .form {
@@ -148,22 +180,5 @@ function toggleMode() {
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.toggle {
-  text-align: center;
-  margin-top: 20px;
-  font-size: 14px;
-  color: #666;
-}
-
-.toggle a {
-  color: #e94560;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.toggle a:hover {
-  text-decoration: underline;
 }
 </style>

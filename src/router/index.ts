@@ -76,6 +76,14 @@ const router = createRouter({
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/Settings.vue')
+        },
+        {
+          path: 'admin/users',
+          name: 'admin-users',
+          component: () => import('@/views/AdminUsers.vue'),
+          // Administrators manage accounts here; it does not need an instance,
+          // hence skipInstanceCheck.
+          meta: { requiresAdmin: true, skipInstanceCheck: true }
         }
       ]
     }
@@ -88,6 +96,8 @@ router.beforeEach(async (to, _from, next) => {
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
   const isGuest = to.matched.some((r) => r.meta.guest)
   const requiresInstance = to.matched.some((r) => r.meta.requiresInstance)
+  const skipInstanceCheck = to.matched.some((r) => r.meta.skipInstanceCheck)
+  const requiresAdmin = to.matched.some((r) => r.meta.requiresAdmin)
 
   if (requiresAuth && !authStore.isAuthenticated) {
     await authStore.checkAuth()
@@ -99,9 +109,13 @@ router.beforeEach(async (to, _from, next) => {
   if (requiresAuth && !authStore.isAuthenticated) {
     return next({ name: 'login' })
   }
+  if (requiresAdmin && !authStore.isAdmin) {
+    // Non-administrators have no business on the user-management page.
+    return next({ name: 'dashboard' })
+  }
   // After auth: if the page expects an active instance and none is set,
   // route the user through the selection page first.
-  if (requiresInstance && !instanceStore.hasSelection) {
+  if (requiresInstance && !skipInstanceCheck && !instanceStore.hasSelection) {
     return next({ name: 'select-instance' })
   }
   next()
