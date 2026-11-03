@@ -528,77 +528,7 @@
         </div>
       </div>
 
-      <!-- Conversation panel: right-side collapsible panel showing -->
-      <!-- the agent's mailbox conversations in real time.           -->
-      <aside class="conv-panel" :class="{ 'conv-panel-open': convPanelOpen }">
-        <button
-          class="conv-panel-toggle"
-          :title="convPanelOpen ? 'Hide conversations' : 'Show conversations'"
-          @click="toggleConvPanel"
-        >
-          <span class="conv-panel-toggle-icon">{{ convPanelOpen ? '▶' : '◀' }}</span>
-          <span class="conv-panel-toggle-label">
-            💬
-            <span v-if="conversations.length > 0" class="conv-panel-count">{{ conversations.length }}</span>
-          </span>
-        </button>
-        <div v-if="convPanelOpen" class="conv-panel-content">
-          <div class="conv-panel-header">
-            <span class="conv-panel-title">Conversations</span>
-            <button class="conv-panel-refresh" title="Refresh" @click="refreshConversations" :disabled="convLoading">
-              {{ convLoading ? '…' : '↻' }}
-            </button>
-          </div>
-          <div v-if="convError" class="conv-panel-error">{{ convError }}</div>
-          <div v-if="!convLoading && conversations.length === 0" class="conv-panel-empty muted small">
-            No conversations yet.
-          </div>
-          <ul class="conv-list">
-            <li
-              v-for="conv in conversations"
-              :key="conv.conversationId"
-              :class="{ 'conv-item-active': convExpandedId === conv.conversationId }"
-              class="conv-item"
-              @click="toggleConvExpand(conv.conversationId)"
-            >
-              <div class="conv-item-header">
-                <span class="conv-item-id">conv#{{ conv.conversationId }}</span>
-                <span v-if="conv.unhandledCount > 0" class="conv-item-badge">{{ conv.unhandledCount }}</span>
-                <span class="conv-item-count">{{ conv.messageCount }} msg</span>
-                <span class="conv-item-kind" v-if="conv.lastMessageKind">{{ conv.lastMessageKind }}</span>
-              </div>
-              <div class="conv-item-preview" v-if="conv.lastMessagePreview">
-                {{ conv.lastMessagePreview.slice(0, 80) }}
-              </div>
-              <div class="conv-item-time" v-if="conv.lastMessageAt">{{ formatTime(conv.lastMessageAt) }}</div>
-              <!-- Expanded conversation messages -->
-              <div
-                v-if="convExpandedId === conv.conversationId"
-                class="conv-messages"
-                @click.stop
-              >
-                <div v-if="convMsgLoading" class="muted small">Loading messages…</div>
-                <div v-else-if="convMessages.length === 0" class="muted small">No messages found.</div>
-                <div
-                  v-for="msg in convMessages"
-                  :key="msg.messageId"
-                  class="conv-msg"
-                  :class="{ 'conv-msg-out': msg.senderSessionId === activeSessionId }"
-                >
-                  <div class="conv-msg-header">
-                    <span class="conv-msg-kind">{{ msg.kind }}</span>
-                    <span class="conv-msg-from">{{ shortId(msg.senderSessionId) }}</span>
-                    <span v-if="msg.acked" class="conv-msg-acked">✓</span>
-                  </div>
-                  <div class="conv-msg-subject" v-if="msg.subject">{{ msg.subject }}</div>
-                  <pre class="conv-msg-body">{{ msg.body }}</pre>
-                  <div class="conv-msg-time">{{ formatTime(msg.createdAt) }}</div>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </div>
-      </aside>
+      <ConversationPanel :session-id="activeSessionId" />
       </template>
     </main>
 
@@ -610,272 +540,47 @@
       right-click any session and pick "Export full tree".
     -->
 
-    <!-- New session file selector modal -->
-    <div v-if="showNewModal" class="modal" @click.self="showNewModal = false">
-      <div class="modal-content wide">
-        <h2>New Agent Session</h2>
-        <p class="subtitle">Search for a binary file to analyze, or use an existing Ghidra project.</p>
+    <NewSessionModal
+      v-model:open="showNewModal"
+      :creating="creatingSession"
+      :llm-configured="llmConfigs.length > 0"
+      :model-name="selectedLlmModel"
+      @update:creating="creatingSession = $event"
+      @created="onSessionCreated"
+    />
 
-        <div v-if="llmConfigs.length === 0" class="no-llm-warning">
-          <strong>No LLM configuration found.</strong>
-          You need to create an LLM configuration in
-          <a href="#/settings" class="llm-link">Settings</a> before the agent can respond.
-        </div>
+    <ToolConfirmModal
+      :request="pendingConfirmation"
+      :busy="confirmationBusy"
+      :agent-name="confirmationSessionName"
+      @approve="approve"
+      @deny="deny"
+    />
 
-        <!-- Mode tabs -->
-        <div class="session-mode-tabs">
-          <button
-            :class="['tab-btn', { active: sessionCreateMode === 'binary' }]"
-            @click="sessionCreateMode = 'binary'"
-          >Search Binary</button>
-          <button
-            :class="['tab-btn', { active: sessionCreateMode === 'project' }]"
-            @click="sessionCreateMode = 'project'"
-          >Use Existing Project</button>
-        </div>
-
-        <!-- Tab 1: Binary search (legacy flow) -->
-        <div v-if="sessionCreateMode === 'binary'">
-          <div class="form-group">
-            <label>Search files</label>
-            <div class="search-row">
-              <input
-                v-model="fileSearchQuery"
-                placeholder="Search by name, ID, architecture…"
-                @keydown.enter="searchFiles"
-                class="search-input"
-              />
-              <button class="btn-secondary" @click="searchFiles" :disabled="searching">
-                {{ searching ? 'Searching…' : 'Search' }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="searchError" class="error">{{ searchError }}</div>
-
-          <div v-if="searchResults.length > 0" class="file-list">
-            <div
-              v-for="f in searchResults"
-              :key="f.id"
-              :class="['file-item', { selected: selectedFile?.id === f.id }]"
-              @click="selectFileForSession(f)"
-            >
-              <div class="file-name">{{ f.name }}</div>
-              <div class="file-meta">
-                <span class="tag">ID: {{ f.id }}</span>
-                <span v-if="f.arch" class="tag">{{ f.arch }}</span>
-                <span v-if="f.format" class="tag">{{ f.format }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="fileSearchQuery && !searching" class="muted small">
-            No matching files found.
-          </div>
-
-          <div v-if="selectedFile" class="form-group project-group">
-            <label>Ghidra project</label>
-            <div class="project-mode-row">
-              <label class="radio-label">
-                <input type="radio" value="new" v-model="projectMode" />
-                Create new project
-              </label>
-              <label class="radio-label">
-                <input type="radio" value="existing" v-model="projectMode" :disabled="ghidraProjects.length === 0" />
-                Use existing project
-              </label>
-            </div>
-            <input
-              v-if="projectMode === 'new'"
-              v-model="selectedProjectName"
-              class="search-input"
-              placeholder="Project name"
-            />
-            <select v-else v-model="selectedProjectName" class="search-input">
-              <option value="" disabled>— Select project —</option>
-              <option v-for="p in ghidraProjects" :key="p" :value="p">{{ p }}</option>
-            </select>
-            <div class="muted small project-hint">
-              run_module and Ghidra scripts will use this project for the selected binary.
-            </div>
-            <div v-if="projectNameError" class="error project-error">{{ projectNameError }}</div>
-          </div>
-        </div>
-
-        <!-- Tab 2: Use existing project → pick program -->
-        <div v-if="sessionCreateMode === 'project'">
-          <div class="form-group">
-            <label>Select Ghidra project</label>
-            <select v-model="selectedExistingProject" class="search-input" @change="onExistingProjectChange">
-              <option value="" disabled>— Select project —</option>
-              <option v-for="p in ghidraProjects" :key="p" :value="p">{{ p }}</option>
-            </select>
-          </div>
-
-          <div v-if="loadingPrograms" class="muted small">Loading programs…</div>
-          <div v-else-if="programList.length > 0" class="file-list">
-            <div
-              v-for="prog in programList"
-              :key="prog.name"
-              :class="['file-item', { selected: selectedProgram?.name === prog.name }]"
-              @click="selectedProgram = prog"
-            >
-              <div class="file-name">{{ prog.name }}</div>
-              <div class="file-meta">
-                <span class="tag">{{ prog.path }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="selectedExistingProject && !loadingPrograms" class="muted small">
-            No programs found in this project.
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button @click="showNewModal = false" class="btn-secondary">Cancel</button>
-          <button @click="createSession" class="btn-primary" :disabled="!canCreateSession">
-            {{ creatingSession ? 'Creating…' : createButtonLabel }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tool confirmation modal (human-in-the-loop) -->
-    <div v-if="confirmationState" class="confirm-overlay" @click.self>
-      <div class="confirm-modal">
-        <div class="confirm-header">
-          <span class="confirm-icon">⚠️</span>
-          <span class="confirm-title">
-            {{ confirmationState.action === 'file_access' ? 'File Access Outside Workspace' : 'Tool Confirmation Required' }}
-          </span>
-        </div>
-        <div class="confirm-body">
-          <p class="confirm-tool">
-            <span class="confirm-label">Tool:</span>
-            <code>{{ confirmationState.toolName }}</code>
-          </p>
-          <p v-if="confirmationSessionName" class="confirm-tool">
-            <span class="confirm-label">Agent:</span>
-            <code>{{ confirmationSessionName }}</code>
-          </p>
-          <template v-if="confirmationState.action === 'file_access'">
-            <p class="confirm-label-text">
-              The agent wants to <strong>{{ confirmationState.command.split(' ')[0] }}</strong>
-              a file <strong>outside</strong> the workspace:
-            </p>
-            <pre class="confirm-command">{{ confirmationState.targetPath || confirmationState.command }}</pre>
-          </template>
-          <template v-else>
-            <p class="confirm-label-text">The agent wants to execute:</p>
-            <pre class="confirm-command">{{ confirmationState.command }}</pre>
-            <div class="confirm-meta">
-              <div><span class="confirm-label">Working dir:</span> <code>{{ confirmationState.workingDirectory }}</code></div>
-              <div><span class="confirm-label">Timeout:</span> {{ confirmationState.timeout }}s</div>
-            </div>
-          </template>
-        </div>
-        <div class="confirm-actions">
-          <button class="btn-secondary" @click="denyConfirmation" :disabled="confirmationBusy">
-            Deny
-          </button>
-          <button class="btn-primary confirm-approve" @click="approveConfirmation" :disabled="confirmationBusy">
-            {{ confirmationBusy ? '…' : 'Approve' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- User choice modal (ask_user_choice tool) -->
-    <div v-if="choiceState" class="confirm-overlay" @click.self>
-      <div class="confirm-modal">
-        <div class="confirm-header">
-          <span class="confirm-icon">❓</span>
-          <span class="confirm-title">Agent Asks for Your Choice</span>
-        </div>
-        <div class="confirm-body">
-          <p v-if="choiceSessionName" class="confirm-tool">
-            <span class="confirm-label">Agent:</span>
-            <code>{{ choiceSessionName }}</code>
-          </p>
-          <p class="confirm-label-text">{{ choiceState.question }}</p>
-          <div class="choice-options">
-            <label
-              v-for="(opt, idx) in choiceState.options"
-              :key="idx"
-              class="choice-option"
-              :class="{ selected: choiceSelected === opt }"
-            >
-              <input type="radio" name="ask-user-choice" :value="opt" v-model="choiceSelected" />
-              <span class="choice-option-text">{{ opt }}</span>
-            </label>
-            <label
-              v-if="choiceState.allowCustomInput"
-              class="choice-option"
-              :class="{ selected: choiceSelected === CUSTOM_CHOICE_VALUE }"
-            >
-              <input type="radio" name="ask-user-choice" :value="CUSTOM_CHOICE_VALUE" v-model="choiceSelected" />
-              <span class="choice-option-text">Custom answer…</span>
-            </label>
-          </div>
-          <textarea
-            v-if="choiceState.allowCustomInput && choiceSelected === CUSTOM_CHOICE_VALUE"
-            v-model="choiceCustomText"
-            class="choice-custom-input"
-            rows="3"
-            placeholder="Type your own answer…"
-          ></textarea>
-
-          <!-- Follow-up (BTW) questions: ask the side assistant for more
-               info before deciding. Submitting refreshes the timeout. -->
-          <div class="choice-btw">
-            <div class="choice-btw-header">
-              <span class="choice-btw-title">Need more info? Ask a follow-up first</span>
-              <span class="choice-countdown" title="The request auto-cancels after inactivity">
-                auto-cancel in {{ choiceCountdown }}
-              </span>
-            </div>
-            <div v-if="btwThread.length" class="choice-btw-thread">
-              <div v-for="(qa, i) in btwThread" :key="i" class="choice-btw-item">
-                <p class="choice-btw-q"><span class="choice-btw-tag">Q</span>{{ qa.question }}</p>
-                <p v-if="qa.answer" class="choice-btw-a"><span class="choice-btw-tag">A</span>{{ qa.answer }}</p>
-                <p v-else class="choice-btw-a choice-btw-pending"><span class="choice-btw-tag">A</span>Thinking…</p>
-              </div>
-            </div>
-            <div class="choice-btw-input-row">
-              <input
-                v-model="btwInput"
-                class="choice-btw-input"
-                type="text"
-                placeholder="e.g. Why these options? What did you find so far?"
-                :disabled="btwBusy"
-                @keyup.enter="askBtw"
-              />
-              <button class="btn-secondary" @click="askBtw" :disabled="btwBusy || !btwInput.trim()">
-                {{ btwBusy ? '…' : 'Ask' }}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="confirm-actions">
-          <button class="btn-secondary" @click="cancelChoice" :disabled="choiceBusy">
-            Cancel
-          </button>
-          <button class="btn-primary confirm-approve" @click="submitChoice" :disabled="choiceBusy || !canSubmitChoice">
-            {{ choiceBusy ? '…' : 'Submit' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <UserChoiceModal
+      :request="pendingChoice"
+      :busy="choiceBusy"
+      :agent-name="choiceSessionName"
+      @submit="respondChoice($event, false)"
+      @cancel="respondChoice(null, true)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { agentApi, fileApi, llmConfigApi, workflowApi, projectApi } from '@/services/api'
-import type { AgentSession, AgentMessage, SubAgentSummary, ConversationSummary, ConversationMessage, PendingConfirmation, PendingUserChoice, BtwQA } from '@/types'
-import type { FileSearchResult, StoredKeyEntry } from '@/services/api'
+import { agentApi, llmConfigApi } from '@/services/api'
+import type { AgentSession, AgentMessage, SubAgentSummary } from '@/types'
+import type { StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
 import SessionTreeItem from '@/components/SessionTreeItem.vue'
 import FilterDropdown from '@/components/FilterDropdown.vue'
+import ConversationPanel from '@/components/agent/ConversationPanel.vue'
+import NewSessionModal from '@/components/agent/NewSessionModal.vue'
+import ToolConfirmModal from '@/components/agent/ToolConfirmModal.vue'
+import UserChoiceModal from '@/components/agent/UserChoiceModal.vue'
+import { useHumanInTheLoop } from '@/composables/useHumanInTheLoop'
+import { formatTime, formatBytes, formatDuration, shortId } from '@/utils/agentFormat'
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
@@ -1147,11 +852,11 @@ async function runSearch(q: string) {
 
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
+const showNewModal = ref(false)
 const creatingSession = ref(false)
 const sending = ref(false)
 const exportingTree = ref(false)
 const errorMsg = ref('')
-const modalError = ref('')
 const input = ref('')
 const tokenUsage = ref<{ input: number; output: number } | null>(null)
 
@@ -1338,9 +1043,8 @@ onMounted(async () => {
   startListPolling()
   void refreshAllStatuses()
 
-  // Global confirmation poll: surfaces confirmations raised by ANY
-  // session (e.g. a sub-agent), not just the one being viewed.
-  startGlobalConfirmationPolling()
+  // Human-in-the-loop prompts for ANY session (e.g. a sub-agent).
+  startHumanInTheLoop()
 
   // Check URL params for a pre-selected session (e.g. from workflow detail)
   const params = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search)
@@ -1407,8 +1111,7 @@ onUnmounted(() => {
   stopStatusPolling()
   stopListPolling()
   if (nowTickInterval) { clearInterval(nowTickInterval); nowTickInterval = null }
-  if (choiceNowTickInterval) { clearInterval(choiceNowTickInterval); choiceNowTickInterval = null }
-  stopGlobalConfirmationPolling()
+  stopHumanInTheLoop()
   stopStreamPolling()
   // Clear the hover card's leave-debounce timer to prevent a
   // dangling setTimeout from firing after unmount and clobbering
@@ -1664,49 +1367,6 @@ const hoveredKind = computed<'non-terminal' | 'terminal' | 'unknown'>(() => {
   return 'unknown'
 })
 
-const showNewModal = ref(false)
-const fileSearchQuery = ref('')
-const searchResults = ref<FileSearchResult[]>([])
-const searching = ref(false)
-const searchError = ref('')
-const selectedFile = ref<FileSearchResult | null>(null)
-const ghidraProjects = ref<string[]>([])
-const projectMode = ref<'new' | 'existing'>('new')
-const selectedProjectName = ref('')
-const validProjectName = /^[A-Za-z0-9._-]{1,64}$/
-const projectNameError = computed(() => {
-  if (!selectedFile.value) return ''
-  const name = selectedProjectName.value.trim()
-  if (!name) return 'Project name is required.'
-  if (!validProjectName.test(name) || name.includes('..')) {
-    return 'Use 1-64 chars: letters, digits, dot, underscore or hyphen.'
-  }
-  return ''
-})
-
-// ---- New session: "Use Existing Project" tab state ----
-const sessionCreateMode = ref<'binary' | 'project'>('binary')
-const selectedExistingProject = ref('')
-const programList = ref<{ name: string; path: string }[]>([])
-const selectedProgram = ref<{ name: string; path: string } | null>(null)
-const loadingPrograms = ref(false)
-
-const canCreateSession = computed(() => {
-  if (creatingSession.value) return false
-  if (sessionCreateMode.value === 'binary') {
-    return true // empty session or with file — validation in createSession
-  }
-  // project mode: need both project and program selected
-  return !!selectedExistingProject.value && !!selectedProgram.value
-})
-
-const createButtonLabel = computed(() => {
-  if (sessionCreateMode.value === 'binary') {
-    return selectedFile.value ? `Analyze "${selectedFile.value.name}"` : 'Start Empty'
-  }
-  return selectedProgram.value ? `Analyze "${selectedProgram.value.name}"` : 'Select a program'
-})
-
 async function loadSessions() {
   loadingSessions.value = true
   try {
@@ -1727,138 +1387,20 @@ async function loadSessions() {
 
 function openNewSessionModal() {
   showNewModal.value = true
-  fileSearchQuery.value = ''
-  searchResults.value = []
-  searchError.value = ''
-  modalError.value = ''
-  selectedFile.value = null
-  projectMode.value = 'new'
-  selectedProjectName.value = defaultProjectName()
-  sessionCreateMode.value = 'binary'
-  selectedExistingProject.value = ''
-  programList.value = []
-  selectedProgram.value = null
-  loadGhidraProjects()
 }
 
-function defaultProjectName(file?: FileSearchResult | null): string {
-  const base = (file?.name || 'agent-session')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32) || 'agent-session'
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-  return `${base}-${stamp}`
-}
-
-function selectFileForSession(file: FileSearchResult) {
-  selectedFile.value = file
-  modalError.value = ''
-  if (projectMode.value === 'new') selectedProjectName.value = defaultProjectName(file)
-}
-
-async function loadGhidraProjects() {
-  try {
-    const { data } = await workflowApi.projects()
-    ghidraProjects.value = data.projects || []
-    if (projectMode.value === 'existing') {
-      selectedProjectName.value = ghidraProjects.value[0] || ''
-    }
-  } catch {
-    ghidraProjects.value = []
-    if (projectMode.value === 'existing') selectedProjectName.value = ''
-  }
-}
-
-watch(projectMode, (mode) => {
-  modalError.value = ''
-  if (mode === 'existing') {
-    selectedProjectName.value = ghidraProjects.value[0] || ''
-  } else {
-    selectedProjectName.value = defaultProjectName(selectedFile.value)
-  }
-})
-
-watch(selectedProjectName, () => {
-  modalError.value = ''
-})
-
-async function searchFiles() {
-  if (!fileSearchQuery.value.trim()) return
-  searching.value = true
-  searchError.value = ''
-  try {
-    const { data } = await fileApi.search(fileSearchQuery.value.trim())
-    searchResults.value = data.files || []
-  } catch (e: any) {
-    searchError.value = e?.response?.data?.error || e?.message || 'Search failed.'
-    searchResults.value = []
-  } finally {
-    searching.value = false
-  }
-}
-
-async function onExistingProjectChange() {
-  selectedProgram.value = null
-  programList.value = []
-  if (!selectedExistingProject.value) return
-  loadingPrograms.value = true
-  try {
-    const { data } = await projectApi.programs(selectedExistingProject.value)
-    programList.value = data.programs || []
-  } catch {
-    programList.value = []
-  } finally {
-    loadingPrograms.value = false
-  }
-}
-
-async function createSession() {
-  if (creatingSession.value) return
-  modalError.value = ''
-
-  if (sessionCreateMode.value === 'binary') {
-    if (selectedFile.value && projectNameError.value) {
-      modalError.value = projectNameError.value
-      return
-    }
-  } else {
-    if (!selectedExistingProject.value || !selectedProgram.value) return
-  }
-
-  creatingSession.value = true
-  errorMsg.value = ''
-  try {
-    const payload: any = {
-      modelName: selectedLlmModel.value || undefined
-    }
-    if (sessionCreateMode.value === 'binary' && selectedFile.value) {
-      payload.binaryId = selectedFile.value.id
-      payload.sessionName = `Analysis of ${selectedFile.value.name}`
-      payload.projectName = selectedProjectName.value.trim()
-      payload.projectMode = projectMode.value
-    } else if (sessionCreateMode.value === 'project') {
-      payload.projectName = selectedExistingProject.value
-      payload.projectMode = 'existing'
-      payload.programName = selectedProgram.value!.name
-      payload.sessionName = `Analysis of ${selectedProgram.value!.name}`
-    }
-    const { data } = await agentApi.createSession(payload)
-    sessions.value.unshift(data)
-    // Reveal the fresh session under the filter view: select its
-    // project and clear the finer filters / any active search.
-    projectFilter.value = projectKeyOf(data)
-    workflowFilter.value = null
-    moduleFilter.value = null
-    searchQuery.value = ''
-    searchMatchIds.value = null
-    showNewModal.value = false
-    tokenUsage.value = null
-    await selectSession(data.sessionId)
-  } catch (e: any) {
-    modalError.value = e?.response?.data?.error || e?.message || 'Failed to create session.'
-  } finally {
-    creatingSession.value = false
-  }
+/** The modal created a session: reveal it and select it. */
+async function onSessionCreated(data: AgentSession) {
+  sessions.value.unshift(data)
+  // Reveal the fresh session under the filter view: select its
+  // project and clear the finer filters / any active search.
+  projectFilter.value = projectKeyOf(data)
+  workflowFilter.value = null
+  moduleFilter.value = null
+  searchQuery.value = ''
+  searchMatchIds.value = null
+  tokenUsage.value = null
+  await selectSession(data.sessionId)
 }
 
 let messagePollInterval: number | null = null
@@ -2113,24 +1655,6 @@ async function refreshActiveStatus() {
     const { data } = await agentApi.getSession(id)
     if (activeSessionId.value !== id) return  // session switched during fetch
     applySessionUpdate(data)
-    // Detect pending tool-confirmation requests and surface them
-    // to the user via a modal. The backend sets `pendingConfirmation`
-    // when a tool (e.g. run_shell) is blocked waiting for approval.
-    const pc = data.pendingConfirmation
-    if (pc && !confirmationState.value) {
-      confirmationState.value = { ...pc, sessionId: id }
-    } else if (!pc && confirmationState.value?.sessionId === id) {
-      // The confirmation was resolved (approved/denied/timed out)
-      // and the backend cleared it — close our modal.
-      confirmationState.value = null
-    }
-    // Same for pending user-choice requests (ask_user_choice tool).
-    const puc = data.pendingUserChoice
-    if (puc && !choiceState.value) {
-      openChoiceModal(id, puc)
-    } else if (!puc && choiceState.value?.sessionId === id) {
-      choiceState.value = null
-    }
     recordPollSuccess()
   } catch (e) {
     recordPollFailure(e)
@@ -2313,249 +1837,31 @@ function startStatusPolling() {
  * `pendingConfirmation` field. Cleared when the backend no longer
  * reports one (i.e. the user responded or the tool timed out).
  */
-const confirmationState = ref<(PendingConfirmation & { sessionId: string }) | null>(null)
-const confirmationBusy = ref(false)
+const {
+  pendingConfirmation,
+  confirmationBusy,
+  pendingChoice,
+  choiceBusy,
+  start: startHumanInTheLoop,
+  stop: stopHumanInTheLoop,
+  approve,
+  deny,
+  respondChoice
+} = useHumanInTheLoop()
 
 /** Name of the agent that raised the open confirmation, if known. */
 const confirmationSessionName = computed(() => {
-  const cs = confirmationState.value
+  const cs = pendingConfirmation.value
   if (!cs) return null
   return findSessionById(cs.sessionId)?.sessionName ?? cs.sessionId
 })
-
-// ---- User choice (ask_user_choice tool, human-in-the-loop) ----
-
-/** Sentinel v-model value for the "Custom answer…" radio option. */
-const CUSTOM_CHOICE_VALUE = '__custom__'
-
-/** Current pending user-choice request, or `null`. */
-const choiceState = ref<(PendingUserChoice & { sessionId: string }) | null>(null)
-const choiceBusy = ref(false)
-/** Currently selected option (an option string, or CUSTOM_CHOICE_VALUE). */
-const choiceSelected = ref('')
-/** Free-form text when the "Custom answer…" option is selected. */
-const choiceCustomText = ref('')
 
 /** Name of the agent that raised the open choice request, if known. */
 const choiceSessionName = computed(() => {
-  const cs = choiceState.value
+  const cs = pendingChoice.value
   if (!cs) return null
   return findSessionById(cs.sessionId)?.sessionName ?? cs.sessionId
 })
-
-/** Submit is allowed once an option is picked (custom requires text). */
-const canSubmitChoice = computed(() => {
-  if (!choiceState.value) return false
-  if (choiceSelected.value === CUSTOM_CHOICE_VALUE) {
-    return choiceCustomText.value.trim().length > 0
-  }
-  return choiceSelected.value.length > 0
-})
-
-/** Open the choice modal with freshly reset selection state. */
-function openChoiceModal(sessionId: string, puc: PendingUserChoice) {
-  choiceSelected.value = ''
-  choiceCustomText.value = ''
-  btwInput.value = ''
-  btwThread.value = (puc.btwHistory || []).map(qa => ({ ...qa }))
-  choiceState.value = { ...puc, sessionId }
-}
-
-// ---- BTW (follow-up questions inside the choice modal) ----
-
-/** Inactivity timeout mirrored from the backend (10 minutes). */
-const CHOICE_TIMEOUT_MS = 600_000
-
-/** Follow-up question composer text. */
-const btwInput = ref('')
-const btwBusy = ref(false)
-/** Local copy of the Q&A thread (initialised from the backend history). */
-const btwThread = ref<BtwQA[]>([])
-
-/** 1s ticker driving the inactivity countdown display. */
-const choiceNowTick = ref(Date.now())
-let choiceNowTickInterval: number | null = null
-
-watch(choiceState, (v) => {
-  if (v && choiceNowTickInterval == null) {
-    choiceNowTickInterval = window.setInterval(() => { choiceNowTick.value = Date.now() }, 1000)
-  } else if (!v && choiceNowTickInterval != null) {
-    clearInterval(choiceNowTickInterval)
-    choiceNowTickInterval = null
-  }
-})
-
-/** Remaining inactivity time before the backend auto-cancels (m:ss). */
-const choiceCountdown = computed(() => {
-  const cs = choiceState.value
-  if (!cs) return ''
-  const base = cs.lastActivityAt ?? cs.createdAt
-  const remaining = Math.max(0, CHOICE_TIMEOUT_MS - (choiceNowTick.value - base))
-  const m = Math.floor(remaining / 60000)
-  const s = Math.floor((remaining % 60000) / 1000)
-  return `${m}:${s.toString().padStart(2, '0')}`
-})
-
-/** Send a follow-up question; the answer is appended to the thread. */
-async function askBtw() {
-  const cs = choiceState.value
-  const q = btwInput.value.trim()
-  if (!cs || !q || btwBusy.value) return
-  btwBusy.value = true
-  btwInput.value = ''
-  const idx = btwThread.value.length
-  btwThread.value.push({ question: q, answer: '', answeredAt: Date.now() })
-  try {
-    const { data } = await agentApi.askUserChoiceBtw(cs.sessionId, q)
-    const answer = data.answered && data.answer != null
-      ? data.answer
-      : (data.error || '(no answer — the request may already be resolved)')
-    btwThread.value[idx] = { question: q, answer, answeredAt: Date.now() }
-  } catch {
-    btwThread.value[idx] = {
-      question: q,
-      answer: '(failed to get an answer — network error)',
-      answeredAt: Date.now()
-    }
-  } finally {
-    btwBusy.value = false
-  }
-}
-
-/** User clicked Submit — deliver the selected/custom answer. */
-async function submitChoice() {
-  const cs = choiceState.value
-  if (!cs || choiceBusy.value || !canSubmitChoice.value) return
-  const answer = choiceSelected.value === CUSTOM_CHOICE_VALUE
-    ? choiceCustomText.value.trim()
-    : choiceSelected.value
-  choiceBusy.value = true
-  try {
-    await agentApi.respondUserChoice(cs.sessionId, answer, false)
-    // Don't close the modal here — the next poll sees the request is
-    // gone and clears it, keeping the UI in sync with the backend.
-  } catch { /* ignore — next poll will retry */ } finally {
-    choiceBusy.value = false
-  }
-}
-
-/** User clicked Cancel — tell the agent no option was picked. */
-async function cancelChoice() {
-  const cs = choiceState.value
-  if (!cs || choiceBusy.value) return
-  choiceBusy.value = true
-  try {
-    await agentApi.respondUserChoice(cs.sessionId, null, true)
-  } catch { /* ignore */ } finally {
-    choiceBusy.value = false
-  }
-}
-
-/**
- * Global confirmation polling: the per-session poll only covers the
- * session the user is viewing, so a top-level interval polls
- * `/agent/pending-confirmations` (and the user-choice equivalent) to
- * surface a modal for ANY session — e.g. when a sub-agent is the one
- * blocked on confirmation.
- */
-let globalConfirmationPollInterval: number | null = null
-const GLOBAL_CONFIRMATION_POLL_MS = 3000
-
-/**
- * Opens a modal for the oldest pending request if none is showing,
- * and closes the open modal once the backend no longer reports its
- * request (responded elsewhere / timed out).
- */
-async function refreshGlobalPendingConfirmations() {
-  try {
-    // Fetch both human-in-the-loop queues in parallel.
-    const [confRes, choiceRes] = await Promise.all([
-      agentApi.listPendingConfirmations(),
-      agentApi.listPendingUserChoices()
-    ])
-    const pendingConfs = confRes.data.pending || {}
-    const pendingChoices = choiceRes.data.pending || {}
-
-    // Close stale modals: if the backend no longer reports the request
-    // the open modal is showing (responded elsewhere / timed out), clear
-    // it. Covers modals opened for a DIFFERENT session than the active
-    // one — the per-session poll can't see those, so without this check
-    // they would stay up forever.
-    if (confirmationState.value && !(confirmationState.value.sessionId in pendingConfs)) {
-      confirmationState.value = null
-    }
-    if (choiceState.value && !(choiceState.value.sessionId in pendingChoices)) {
-      choiceState.value = null
-    }
-    // One modal at a time.
-    if (confirmationState.value || choiceState.value) return
-
-    // Pick the oldest entry across BOTH queues so the user answers the
-    // longest-waiting request first. Plain loop instead of `minBy`
-    // (not in TypeScript's ES2024 lib).
-    const confEntries = Object.entries(pendingConfs)
-    const choiceEntries = Object.entries(pendingChoices)
-    let oldestConf: [string, PendingConfirmation] | null = null
-    for (const entry of confEntries) {
-      if (!oldestConf || entry[1].createdAt < oldestConf[1].createdAt) oldestConf = entry
-    }
-    let oldestChoice: [string, PendingUserChoice] | null = null
-    for (const entry of choiceEntries) {
-      if (!oldestChoice || entry[1].createdAt < oldestChoice[1].createdAt) oldestChoice = entry
-    }
-    if (oldestConf && (!oldestChoice || oldestConf[1].createdAt <= oldestChoice[1].createdAt)) {
-      const [sessionId, pc] = oldestConf
-      if (sessionId && pc) confirmationState.value = { ...pc, sessionId }
-    } else if (oldestChoice) {
-      const [sessionId, puc] = oldestChoice
-      if (sessionId && puc) openChoiceModal(sessionId, puc)
-    }
-  } catch { /* ignore — next tick will retry */ }
-}
-
-function startGlobalConfirmationPolling() {
-  stopGlobalConfirmationPolling()
-  // Tick once immediately so we don't wait a full interval on mount.
-  refreshGlobalPendingConfirmations()
-  globalConfirmationPollInterval = window.setInterval(
-    refreshGlobalPendingConfirmations,
-    GLOBAL_CONFIRMATION_POLL_MS
-  )
-}
-
-function stopGlobalConfirmationPolling() {
-  if (globalConfirmationPollInterval != null) {
-    clearInterval(globalConfirmationPollInterval)
-    globalConfirmationPollInterval = null
-  }
-}
-
-/** User clicked Approve — deliver the decision to the backend. */
-async function approveConfirmation() {
-  const cs = confirmationState.value
-  if (!cs || confirmationBusy.value) return
-  confirmationBusy.value = true
-  try {
-    await agentApi.respondConfirmation(cs.sessionId, true)
-    // Don't close the modal here — the next status poll will see
-    // the confirmation is gone and clear it. This keeps the UI
-    // in sync with the actual backend state.
-  } catch { /* ignore — next poll will retry */ } finally {
-    confirmationBusy.value = false
-  }
-}
-
-/** User clicked Deny — deliver the decision to the backend. */
-async function denyConfirmation() {
-  const cs = confirmationState.value
-  if (!cs || confirmationBusy.value) return
-  confirmationBusy.value = true
-  try {
-    await agentApi.respondConfirmation(cs.sessionId, false)
-  } catch { /* ignore */ } finally {
-    confirmationBusy.value = false
-  }
-}
 
 function stopStatusPolling() {
   if (statusPollInterval != null) {
@@ -2584,9 +1890,6 @@ async function selectSession(id: string) {
   messages.value = []
   selectedWakeIndex.value = -1
   tokenUsage.value = null
-  // Clear any stale confirmation / choice modal from the previous session.
-  confirmationState.value = null
-  choiceState.value = null
   loadingMessages.value = true
   // Stop previous polling
   if (messagePollInterval) { clearInterval(messagePollInterval); messagePollInterval = null }
@@ -2873,13 +2176,6 @@ async function scrollToBottom() {
   const el = messagesEl.value
   if (!el || userScrolledAway) return
   el.scrollTop = el.scrollHeight
-}
-
-function formatTime(date: string | null | undefined): string {
-  if (!date) return ''
-  const d = new Date(date)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 function toolDurationLabel(m: AgentMessage): string {
@@ -3396,12 +2692,6 @@ function llmProgressLabel(m: AgentMessage, _nowTick?: number): string {
   return head
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
 function llmRetryLabel(m: AgentMessage, _nowTick?: number): string {
   const content = m.content ?? ''
   if (isLLMRetryRecovered(m)) {
@@ -3435,12 +2725,6 @@ function llmRetryLabel(m: AgentMessage, _nowTick?: number): string {
     }
   }
   return `LLM request failed (${errorMsg}). Retry #${retryNum} scheduled (wait ${backoffLabel}).`
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min`
-  return `${(ms / 3_600_000).toFixed(1)}h`
 }
 
 function wakeEventLabel(m: AgentMessage): string {
@@ -3740,11 +3024,6 @@ function subAgentChildSessionId(m: AgentMessage): string | null {
   return parseSubAgentSummary(m)?.sessionId ?? null
 }
 
-function shortId(id?: string | null): string {
-  if (!id) return ''
-  return id.length > 8 ? id.slice(0, 8) : id
-}
-
 
 async function openChildSession(sessionId: string) {
   // The "Open child session transcript" button on a sub-agent tool
@@ -3823,120 +3102,6 @@ watch(
 // participant in, and lets the user expand one to see the full
 // message history.  The panel polls the backend on a slow cadence
 // (CONV_POLL_MS) so the list stays current while the user is
-// reading it, and stops when the panel is collapsed or the active
-// session changes.
-
-const convPanelOpen = ref(false)
-const conversations = ref<ConversationSummary[]>([])
-const convExpandedId = ref<number | null>(null)
-const convMessages = ref<ConversationMessage[]>([])
-const convLoading = ref(false)
-const convError = ref('')
-const convMsgLoading = ref(false)
-
-let convPollInterval: number | null = null
-const CONV_POLL_MS = 5000
-
-function toggleConvPanel() {
-  convPanelOpen.value = !convPanelOpen.value
-  if (convPanelOpen.value) {
-    refreshConversations()
-    startConvPolling()
-  } else {
-    stopConvPolling()
-  }
-}
-
-async function refreshConversations() {
-  if (!activeSessionId.value) return
-  // Skip if a refresh is already in-flight to avoid piling up
-  // requests when the network is slow.
-  if (convLoading.value) return
-  convLoading.value = true
-  convError.value = ''
-  try {
-    const { data } = await agentApi.listConversations(activeSessionId.value, 'all')
-    conversations.value = data.conversations || []
-  } catch (e: any) {
-    convError.value = e?.response?.data?.error || e?.message || 'Failed to load conversations'
-  } finally {
-    convLoading.value = false
-  }
-}
-
-function startConvPolling() {
-  if (convPollInterval != null) return
-  // Always run an immediate tick on (re)start so the panel does
-  // not appear stale for `CONV_POLL_MS` after the user opens it.
-  refreshConversations()
-  convPollInterval = window.setInterval(refreshConversations, CONV_POLL_MS)
-}
-
-function stopConvPolling() {
-  if (convPollInterval != null) {
-    clearInterval(convPollInterval)
-    convPollInterval = null
-  }
-}
-
-async function toggleConvExpand(conversationId: number) {
-  if (convExpandedId.value === conversationId) {
-    // Collapse: clear the cached messages so the next expand
-    // does not briefly flash stale data.
-    convExpandedId.value = null
-    convMessages.value = []
-    return
-  }
-  convExpandedId.value = conversationId
-  convMessages.value = []
-  convMsgLoading.value = true
-  try {
-    const { data } = await agentApi.getConversation(activeSessionId.value!, conversationId)
-    convMessages.value = data.messages || []
-  } catch (e: any) {
-    convError.value = e?.response?.data?.error || e?.message || 'Failed to load messages'
-    convMessages.value = []
-  } finally {
-    convMsgLoading.value = false
-  }
-}
-
-// Reset conversation panel state on session switch so stale data
-// from the previous session doesn't linger. The earlier onUnmounted
-// (declared further up) already stops the status and list polls;
-// we don't start any tree / child-count polls here because those
-// features were removed in favour of the inline session list.
-watch(activeSessionId, async (id) => {
-  if (!id) {
-    // The user just deleted the active session; the per-session
-    // status poll started by selectSession() is now stale and
-    // would 404 forever — stop it explicitly.
-    stopStatusPolling()
-    // Reset the conversation panel for the new session.
-    stopConvPolling()
-    conversations.value = []
-    convExpandedId.value = null
-    convMessages.value = []
-    return
-  }
-  // Reset conversation panel state on session switch so stale
-  // data from the previous session doesn't linger.
-  conversations.value = []
-  convExpandedId.value = null
-  convMessages.value = []
-  if (convPanelOpen.value) {
-    refreshConversations()
-    startConvPolling()
-  }
-}, { immediate: false })
-
-// Stop polling if the component unmounts (route change). The earlier
-// onUnmounted() already stops the status and list polls; this second
-// declaration only handles the conversation cleanup, so the
-// duplicate is fine — Vue merges both hooks.
-onUnmounted(() => {
-  stopConvPolling()
-})
 </script>
 
 <style scoped>
@@ -4467,231 +3632,6 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-}
-
-/* ---- Conversation panel (right-side collapsible) ---- */
-.conv-panel {
-  display: flex;
-  flex-direction: row;
-  border-left: 1px solid #e0e0e0;
-  background: #fafcff;
-  flex-shrink: 0;
-  overflow: hidden;
-  transition: width 0.2s ease;
-  width: 36px;
-}
-.conv-panel-open {
-  width: 340px;
-}
-.conv-panel-toggle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  width: 36px;
-  padding: 10px 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
-  color: #555;
-  font-size: 12px;
-}
-.conv-panel-toggle:hover {
-  background: #eef5ff;
-}
-.conv-panel-toggle-icon {
-  font-size: 10px;
-  color: #999;
-}
-.conv-panel-toggle-label {
-  position: relative;
-  font-size: 15px;
-}
-.conv-panel-count {
-  position: absolute;
-  top: -4px;
-  right: -10px;
-  background: #e94560;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
-  border-radius: 8px;
-  padding: 1px 5px;
-  min-width: 14px;
-  text-align: center;
-  line-height: 1.2;
-}
-.conv-panel-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-left: 1px solid #e8e8e8;
-}
-.conv-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid #eee;
-  flex-shrink: 0;
-}
-.conv-panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-}
-.conv-panel-refresh {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 15px;
-  color: #666;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.conv-panel-refresh:hover:not(:disabled) {
-  background: #e0e0e0;
-}
-.conv-panel-refresh:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.conv-panel-error {
-  padding: 8px 14px;
-  font-size: 12px;
-  color: #c62828;
-}
-.conv-panel-empty {
-  padding: 20px 14px;
-  text-align: center;
-}
-.conv-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  flex: 1;
-}
-.conv-item {
-  padding: 10px 14px;
-  border-bottom: 1px solid #f0f0f0;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.conv-item:hover {
-  background: #f5f9ff;
-}
-.conv-item-active {
-  background: #eef5ff;
-}
-.conv-item-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.conv-item-id {
-  font-size: 12px;
-  font-weight: 600;
-  color: #1976d2;
-}
-.conv-item-badge {
-  background: #e94560;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
-  border-radius: 8px;
-  padding: 1px 6px;
-  min-width: 16px;
-  text-align: center;
-}
-.conv-item-count {
-  font-size: 10px;
-  color: #999;
-  margin-left: auto;
-}
-.conv-item-kind {
-  font-size: 9px;
-  background: #e0e0e0;
-  color: #555;
-  border-radius: 3px;
-  padding: 1px 4px;
-}
-.conv-item-preview {
-  font-size: 11px;
-  color: #666;
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.conv-item-time {
-  font-size: 9px;
-  color: #aaa;
-  margin-top: 2px;
-}
-.conv-messages {
-  margin-top: 8px;
-  border-top: 1px dashed #ddd;
-  padding-top: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-.conv-msg {
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  border-radius: 6px;
-  background: #f5f5f5;
-  font-size: 11px;
-}
-.conv-msg-out {
-  background: #e3f2fd;
-}
-.conv-msg-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 3px;
-}
-.conv-msg-kind {
-  font-size: 9px;
-  font-weight: 600;
-  color: #1976d2;
-  text-transform: uppercase;
-}
-.conv-msg-from {
-  font-size: 10px;
-  color: #888;
-  font-family: monospace;
-}
-.conv-msg-acked {
-  color: #43a047;
-  font-size: 10px;
-  margin-left: auto;
-}
-.conv-msg-subject {
-  font-size: 11px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 2px;
-}
-.conv-msg-body {
-  font-size: 11px;
-  color: #444;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  line-height: 1.4;
-}
-.conv-msg-time {
-  font-size: 9px;
-  color: #aaa;
-  margin-top: 2px;
 }
 
 .empty-state {
@@ -5432,157 +4372,6 @@ onUnmounted(() => {
 }
 .ctx-menu-item:hover { background: #fff5f7; color: #e94560; }
 
-/* ---- New Session Modal ---------------------------------------------------- */
-.modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-.modal-content {
-  background: #fff;
-  padding: 30px;
-  border-radius: 10px;
-  width: 500px;
-  max-width: 90vw;
-  max-height: 85vh;
-  overflow-y: auto;
-}
-.modal-content.wide { width: 650px; }
-.modal-content h2 { margin-bottom: 6px; font-size: 20px; }
-.subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
-
-.session-mode-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 16px;
-  border-bottom: 2px solid #eee;
-}
-.tab-btn {
-  padding: 8px 18px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  cursor: pointer;
-  font-size: 13px;
-  color: #888;
-  transition: color 0.15s, border-color 0.15s;
-}
-.tab-btn:hover { color: #555; }
-.tab-btn.active {
-  color: #e94560;
-  border-bottom-color: #e94560;
-  font-weight: 600;
-}
-
-.no-llm-warning {
-  background: #fff3cd;
-  border: 1px solid #ffeeba;
-  color: #856404;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  margin-bottom: 16px;
-}
-
-.form-group { margin-bottom: 16px; }
-.form-group label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.search-row {
-  display: flex;
-  gap: 10px;
-}
-.search-input {
-  flex: 1;
-  padding: 10px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-}
-.project-mode-row {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 10px;
-}
-.radio-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #444;
-}
-.project-hint { margin-top: 6px; }
-.project-error { margin-top: 6px; font-size: 12px; }
-.modal-error {
-  background: #ffebee;
-  border: 1px solid #ffcdd2;
-  border-radius: 6px;
-  padding: 10px 12px;
-  margin-bottom: 14px;
-}
-
-.file-list {
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  margin-bottom: 16px;
-}
-.file-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid #f0f0f0;
-  cursor: pointer;
-}
-.file-item:hover { background: #fafafa; }
-.file-item.selected { background: #fff5f7; border-left: 3px solid #e94560; }
-.file-item:last-child { border-bottom: none; }
-.file-name { font-size: 14px; font-weight: 500; }
-.file-meta { display: flex; gap: 6px; align-items: center; }
-.tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  background: #f5f5f5;
-  border-radius: 4px;
-  color: #666;
-  white-space: nowrap;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-}
-.btn-secondary {
-  padding: 10px 20px;
-  background: #f5f5f5;
-  color: #333;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.btn-secondary:hover:not(:disabled) { background: #eee; }
-.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.error {
-  color: #d32f2f;
-  font-size: 13px;
-  margin: 8px 0;
-}
-
 /* ---- Session list hint --------------------------------------------------- */
 .session-hint {
   margin-bottom: 8px;
@@ -5790,253 +4579,6 @@ onUnmounted(() => {
   color: #888;
 }
 
-/* ---- Tool confirmation modal ---- */
-.confirm-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-}
-
-.confirm-modal {
-  background: var(--bg-card, #1e1e2e);
-  border: 1px solid var(--border-color, #333346);
-  border-radius: 12px;
-  max-width: 600px;
-  width: 90%;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-
-.confirm-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color, #333346);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.confirm-icon { font-size: 18px; }
-.confirm-title { color: var(--text-primary, #cdd6f4); }
-
-.confirm-body {
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.confirm-tool {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-secondary, #a6adc8);
-}
-.confirm-tool code {
-  background: var(--bg-accent, #313244);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-  color: var(--accent, #cba6f7);
-}
-
-.confirm-label { font-weight: 600; }
-.confirm-label-text {
-  font-size: 13px;
-  color: var(--text-secondary, #a6adc8);
-  margin: 0;
-}
-
-.confirm-command {
-  background: var(--bg-accent, #181825);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 8px;
-  padding: 12px 16px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 13px;
-  color: var(--text-primary, #cdd6f4);
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.confirm-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-secondary, #a6adc8);
-}
-.confirm-meta code {
-  background: var(--bg-accent, #313244);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 11px;
-}
-
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border-color, #333346);
-}
-
-.confirm-approve {
-  background: var(--accent-green, #a6e3a1) !important;
-  color: #1e1e2e !important;
-}
-.confirm-approve:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-/* ---- User choice modal (ask_user_choice) ---- */
-.choice-options {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.choice-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.choice-option:hover {
-  border-color: var(--accent, #cba6f7);
-}
-.choice-option.selected {
-  border-color: var(--accent, #cba6f7);
-  background: var(--bg-accent, #181825);
-}
-.choice-option input[type="radio"] {
-  margin-top: 2px;
-  accent-color: var(--accent, #cba6f7);
-}
-.choice-option-text {
-  font-size: 13px;
-  color: var(--text-primary, #cdd6f4);
-  word-break: break-word;
-}
-
-.choice-custom-input {
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px 12px;
-  background: var(--bg-accent, #181825);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 8px;
-  color: var(--text-primary, #cdd6f4);
-  font-size: 13px;
-  font-family: inherit;
-  resize: vertical;
-  box-sizing: border-box;
-}
-.choice-custom-input:focus {
-  outline: none;
-  border-color: var(--accent, #cba6f7);
-}
-
-/* ---- BTW follow-up area (inside choice modal) ---- */
-.choice-btw {
-  margin-top: 16px;
-  border-top: 1px dashed var(--border-color, #313244);
-  padding-top: 12px;
-}
-
-.choice-btw-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.choice-btw-title {
-  font-size: 12px;
-  color: var(--text-secondary, #a6adc8);
-}
-.choice-countdown {
-  font-size: 11px;
-  color: var(--text-secondary, #a6adc8);
-  font-variant-numeric: tabular-nums;
-}
-
-.choice-btw-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 220px;
-  overflow-y: auto;
-  margin-bottom: 10px;
-}
-.choice-btw-item {
-  background: var(--bg-accent, #181825);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-.choice-btw-q, .choice-btw-a {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: 12px;
-  margin: 0;
-  color: var(--text-primary, #cdd6f4);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.choice-btw-a {
-  margin-top: 6px;
-  color: var(--text-secondary, #a6adc8);
-}
-.choice-btw-pending {
-  font-style: italic;
-}
-.choice-btw-tag {
-  flex-shrink: 0;
-  font-weight: 700;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-card, #1e1e2e);
-  border: 1px solid var(--border-color, #313244);
-  color: var(--accent, #cba6f7);
-}
-
-.choice-btw-input-row {
-  display: flex;
-  gap: 8px;
-}
-.choice-btw-input {
-  flex: 1;
-  padding: 8px 12px;
-  background: var(--bg-accent, #181825);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 8px;
-  color: var(--text-primary, #cdd6f4);
-  font-size: 13px;
-  font-family: inherit;
-}
-.choice-btw-input:focus {
-  outline: none;
-  border-color: var(--accent, #cba6f7);
-}
 </style>
 
 <!-- Markdown rendering styles (non-scoped so they apply to v-html content) -->
