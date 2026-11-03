@@ -435,11 +435,10 @@
           <span
             v-if="lastInputTokens != null && contextLength != null"
             class="token-value context"
-            :title="contextLengthObserved ? 'Empirical lower bound: the largest prompt this model has accepted so far. The true context window may be larger.' : ''"
           >
-            Last input: {{ lastInputTokens.toLocaleString() }} / {{ contextLengthObserved ? '~' : '' }}{{ contextLength.toLocaleString() }}
+            Last input: {{ lastInputTokens.toLocaleString() }} / {{ contextLength.toLocaleString() }}
           </span>
-          <span v-if="lastInputTokens != null && contextLength == null" class="token-value context-dim" title="Failed to fetch model context limit. The remote model registry may be unreachable.">
+          <span v-if="lastInputTokens != null && contextLength == null" class="token-value context-dim" title="This session has no model recorded, so its context window is unknown.">
             Last input: {{ lastInputTokens.toLocaleString() }}<span class="hint-icon"> ⚠</span>
           </span>
           <span v-if="sessionModelName" class="token-model">{{ sessionModelName }}</span>
@@ -1167,8 +1166,6 @@ const roundOutputTokens = ref(0)
 const totalTokens = ref(0)
 const lastInputTokens = ref<number | null>(null)
 const contextLength = ref<number | null>(null)
-/** True when contextLength is an empirical lower bound, not the registry value. */
-const contextLengthObserved = ref(false)
 const sessionModelName = ref('')
 
 // Whether the active session is an automated (non-chat) agent session.
@@ -1956,7 +1953,6 @@ async function refreshMessages() {
     totalTokens.value = roundInputTokens.value + roundOutputTokens.value
     lastInputTokens.value = data.lastInputTokens ?? null
     contextLength.value = data.contextLength ?? null
-    contextLengthObserved.value = data.contextLengthObserved ?? false
     if (messagesChanged) await scrollToBottom()
     recordPollSuccess()
   } catch (e) {
@@ -2654,7 +2650,6 @@ async function selectSession(id: string) {
     totalTokens.value = roundInputTokens.value + roundOutputTokens.value
     lastInputTokens.value = data.lastInputTokens ?? null
     contextLength.value = data.contextLength ?? null
-    contextLengthObserved.value = data.contextLengthObserved ?? false
     await scrollToBottom()
     // Start auto-polling while this session is active
     startMessagePolling()

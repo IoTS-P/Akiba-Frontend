@@ -219,7 +219,7 @@ export const agentApi = {
   } = {}) =>
     api.post<AgentSession>('/agent/sessions', payload),
   getMessages: (sessionId: string) =>
-    api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number; contextLengthObserved?: boolean }>(`/agent/sessions/${sessionId}/messages`),
+    api.get<{ messages: AgentMessage[]; totalInputTokens?: number; totalOutputTokens?: number; lastInputTokens?: number; contextLength?: number }>(`/agent/sessions/${sessionId}/messages`),
   chat: (sessionId: string, content: string, systemPrompt?: string, modelName?: string) =>
     api.post<ChatTurnResponse>(`/agent/sessions/${sessionId}/chat`, {
       content,
