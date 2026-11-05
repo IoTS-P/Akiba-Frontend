@@ -5,7 +5,6 @@ import type {
   InstanceResponse,
   InstanceSummary,
   BackupSummary,
-  AdminUserEntry,
   Script,
   ScriptExecution,
   ScriptRunResponse,
@@ -79,23 +78,6 @@ export const authApi = {
   me: () => api.get<AuthResponse>('/auth/me')
 }
 
-export const adminApi = {
-  listUsers: () =>
-    api.get<{ users: AdminUserEntry[] }>('/admin/users'),
-  createUser: (username: string, password: string, isAdmin = false) =>
-    api.post<AdminUserEntry>('/admin/users', { username, password, isAdmin }),
-  deleteUser: (id: number) =>
-    api.delete<MessageResponse>(`/admin/users/${id}`),
-  resetPassword: (id: number, password: string) =>
-    api.post<MessageResponse>(`/admin/users/${id}/password`, { password }),
-  /**
-   * Lift a brute-force lock. Accounts lock themselves for a day after five
-   * consecutive failures (the server also waits three seconds before answering a
-   * rejected sign-in), so this is the way back in before the lock expires.
-   */
-  unlockUser: (id: number) =>
-    api.post<MessageResponse>(`/admin/users/${id}/unlock`)
-}
 
 export const instanceApi = {
   /**

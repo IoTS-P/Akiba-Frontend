@@ -77,14 +77,6 @@ const router = createRouter({
           name: 'settings',
           component: () => import('@/views/Settings.vue')
         },
-        {
-          path: 'admin/users',
-          name: 'admin-users',
-          component: () => import('@/views/AdminUsers.vue'),
-          // Administrators manage accounts here; it does not need an instance,
-          // hence skipInstanceCheck.
-          meta: { requiresAdmin: true, skipInstanceCheck: true }
-        }
       ]
     }
   ]
