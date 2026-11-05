@@ -512,18 +512,11 @@ async function changePassword() {
   }
 }
 
-// Per-user identity used to derive fixed paths. We fall back to 'default'
-// if the auth store hasn't been hydrated yet (shouldn't happen in practice
-// because the route guards require auth, but the fallback keeps the UI
-// usable during the first render).
-const currentUsername = computed(() => authStore.user?.username || 'default')
-
-// Paths are computed — the user cannot override them. Each user gets an
-// isolated Ghidra project tree and Akiba state directory under their
-// `~/.akiba/<area>/<username>` location.
-const computedLogsRoot = computed(() => `~/.akiba/logs/${currentUsername.value}`)
-const computedWorkspaceRoot = computed(() => `~/.akiba/workspace/${currentUsername.value}`)
-const computedProjectRoot = computed(() => `ghidra_projects/${currentUsername.value}`)
+// Paths are computed — the operator cannot override them. Akiba serves a single
+// operator, so the tree has no per-user level.
+const computedLogsRoot = computed(() => `~/.akiba/logs`)
+const computedWorkspaceRoot = computed(() => `~/.akiba/workspace`)
+const computedProjectRoot = computed(() => `ghidra_projects`)
 
 // Sentinel used in the Project Name dropdown to mark the "create a new
 // project" option. We can't use the empty string because that would be
@@ -722,11 +715,10 @@ const llmProviderList = [
 
 const runtimeConfigs = ref<RuntimeConfigEntry[]>([])
 
-// Compute binaries root from username/instance for display
+// Binaries root for display: one directory per instance, no user level.
 const computedBinariesRoot = computed(() => {
-  const user = gui.username || 'default'
   const inst = gui.usingInstance || 'default'
-  return `~/.akiba/binaries/${user}/${inst}/`
+  return `~/.akiba/binaries/${inst}/`
 })
 
 // Compute a sensible default name for a brand-new project, based on the
