@@ -2,19 +2,15 @@
   <div class="login-page">
     <div class="login-card">
       <h1 class="title">Akiba</h1>
-      <p class="subtitle">{{ isSetup ? 'Create the administrator account' : 'Framework Dashboard' }}</p>
+      <p class="subtitle">{{ isSetup ? 'Set the operator password' : 'Framework Dashboard' }}</p>
 
       <p v-if="isSetup" class="setup-hint">
-        This instance has no accounts yet. The account you create here is the
-        administrator and is the only one that can add further users — no
-        default credentials are shipped with Akiba.
+        This instance has no password yet. Akiba serves a single operator, so
+        the password you choose here is the only way in — no default
+        credentials are shipped with Akiba.
       </p>
 
       <form @submit.prevent="handleSubmit" class="form">
-        <div class="form-group">
-          <label>Username</label>
-          <input v-model="username" type="text" placeholder="Enter username" required />
-        </div>
         <div class="form-group">
           <label>Password</label>
           <input v-model="password" type="password" placeholder="Enter password" required />
@@ -40,7 +36,6 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 
-const username = ref('')
 const password = ref('')
 const confirm = ref('')
 const isSetup = ref(false)
@@ -48,9 +43,8 @@ const loading = ref(false)
 const error = ref('')
 
 onMounted(async () => {
-  // Ask the server whether this deployment still needs its first account. There
-  // is no self-registration any more: either you set up the first administrator
-  // here, or an administrator creates your account in the admin page.
+  // Ask the server whether this deployment still needs a password. There is no
+  // registration: either you set one here, or you sign in with the existing one.
   isSetup.value = await authStore.checkSetupStatus()
 })
 
@@ -67,9 +61,9 @@ async function handleSubmit() {
         error.value = 'Password must be at least 6 characters'
         return
       }
-      await authStore.setup(username.value, password.value)
+      await authStore.setup(password.value)
     } else {
-      await authStore.login(username.value, password.value)
+      await authStore.login(password.value)
     }
     router.push('/')
   } catch (e: any) {

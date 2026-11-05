@@ -89,7 +89,6 @@ router.beforeEach(async (to, _from, next) => {
   const isGuest = to.matched.some((r) => r.meta.guest)
   const requiresInstance = to.matched.some((r) => r.meta.requiresInstance)
   const skipInstanceCheck = to.matched.some((r) => r.meta.skipInstanceCheck)
-  const requiresAdmin = to.matched.some((r) => r.meta.requiresAdmin)
 
   if (requiresAuth && !authStore.isAuthenticated) {
     await authStore.checkAuth()
@@ -100,10 +99,6 @@ router.beforeEach(async (to, _from, next) => {
   }
   if (requiresAuth && !authStore.isAuthenticated) {
     return next({ name: 'login' })
-  }
-  if (requiresAdmin && !authStore.isAdmin) {
-    // Non-administrators have no business on the user-management page.
-    return next({ name: 'dashboard' })
   }
   // After auth: if the page expects an active instance and none is set,
   // route the user through the selection page first.

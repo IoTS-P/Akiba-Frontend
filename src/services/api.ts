@@ -69,11 +69,13 @@ export const authApi = {
    */
   setupStatus: () =>
     api.post<{ needsSetup: boolean; userCount: number }>('/auth/setup-status'),
-  /** Create the first administrator. Server-side only allowed while no user exists. */
-  setup: (username: string, password: string) =>
-    api.post<AuthResponse>('/auth/setup', { username, password }),
-  login: (username: string, password: string) =>
-    api.post<AuthResponse>('/auth/login', { username, password }),
+  /** Set the operator password. Server-side only allowed while none exists. */
+  setup: (password: string) =>
+    api.post<AuthResponse>('/auth/setup', { password }),
+  login: (password: string) =>
+    api.post<AuthResponse>('/auth/login', { password }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<MessageResponse>('/auth/password', { currentPassword, newPassword }),
   logout: () => api.post<MessageResponse>('/auth/logout'),
   me: () => api.get<AuthResponse>('/auth/me')
 }

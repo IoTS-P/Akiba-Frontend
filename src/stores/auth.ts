@@ -5,12 +5,11 @@ import type { AuthResponse } from '@/types'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('token'))
-  const user = ref<{ userId: number; username: string; isAdmin: boolean } | null>(
+  const user = ref<{ username: string } | null>(
     JSON.parse(localStorage.getItem('user') || 'null')
   )
 
   const isAuthenticated = computed(() => !!token.value)
-  const isAdmin = computed(() => user.value?.isAdmin === true)
 
   /** True while the deployment has no account yet — the UI then shows setup. */
   const needsSetup = ref(false)
@@ -31,15 +30,20 @@ export const useAuthStore = defineStore('auth', () => {
     return needsSetup.value
   }
 
-  async function setup(username: string, password: string) {
-    const response = await authApi.setup(username, password)
+  async function setup(password: string) {
+    const response = await authApi.setup(password)
     needsSetup.value = false
     setAuth(response.data)
   }
 
-  async function login(username: string, password: string) {
-    const response = await authApi.login(username, password)
+  async function login(password: string) {
+    const response = await authApi.login(password)
     setAuth(response.data)
+  }
+
+  /** Replace the operator password; the session stays valid. */
+  async function changePassword(currentPassword: string, newPassword: string) {
+    await authApi.changePassword(currentPassword, newPassword)
   }
 
   async function logout() {
@@ -54,11 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!token.value) return
     try {
       const response = await authApi.me()
-      user.value = {
-        userId: response.data.userId,
-        username: response.data.username,
-        isAdmin: response.data.isAdmin === true
-      }
+      user.value = { username: response.data.username }
       localStorage.setItem('user', JSON.stringify(user.value))
     } catch {
       clearAuth()
@@ -67,11 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setAuth(data: AuthResponse) {
     token.value = data.token
-    user.value = {
-      userId: data.userId,
-      username: data.username,
-      isAdmin: data.isAdmin === true
-    }
+    user.value = { username: data.username }
     localStorage.setItem('token', data.token)
     localStorage.setItem('user', JSON.stringify(user.value))
   }
@@ -87,12 +83,12 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     user,
     isAuthenticated,
-    isAdmin,
     needsSetup,
     setupChecked,
     checkSetupStatus,
     setup,
     login,
+    changePassword,
     logout,
     checkAuth
   }

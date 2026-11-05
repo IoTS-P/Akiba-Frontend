@@ -1,9 +1,7 @@
 export interface AuthResponse {
   token: string
-  userId: number
+  /** Fixed to "admin": Akiba serves a single operator. */
   username: string
-  /** Administrators may manage users; the first account created is one. */
-  isAdmin?: boolean
 }
 
 export interface MessageResponse {

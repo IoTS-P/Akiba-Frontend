@@ -436,6 +436,38 @@
         Last checked: {{ updateStatus.lastCheck }}
       </div>
     </div>
+    <div class="card">
+      <h2>Operator Password</h2>
+      <p class="subtitle">
+        Akiba serves a single operator, so this password is the only way in.
+        Changing it keeps the current session valid.
+      </p>
+
+      <form @submit.prevent="changePassword" class="form">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Current password</label>
+            <input v-model="passwordForm.current" type="password" autocomplete="current-password" />
+          </div>
+          <div class="form-group">
+            <label>New password</label>
+            <input v-model="passwordForm.next" type="password" autocomplete="new-password" />
+          </div>
+          <div class="form-group">
+            <label>Repeat new password</label>
+            <input v-model="passwordForm.confirm" type="password" autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div v-if="passwordError" class="error">{{ passwordError }}</div>
+        <div v-if="passwordNotice" class="muted small">{{ passwordNotice }}</div>
+
+        <button class="btn-primary" type="submit" :disabled="passwordSaving">
+          {{ passwordSaving ? 'Saving…' : 'Change Password' }}
+        </button>
+      </form>
+    </div>
+
   </div>
 </template>
 
@@ -446,6 +478,39 @@ import { useAuthStore } from '@/stores/auth'
 import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry, ModuleEntry } from '@/services/api'
 
 const authStore = useAuthStore()
+
+// Operator password form. Akiba has exactly one credential, so this is the
+// whole account surface: no registration, no user list, no reset by proxy.
+const passwordForm = reactive({ current: '', next: '', confirm: '' })
+const passwordSaving = ref(false)
+const passwordError = ref('')
+const passwordNotice = ref('')
+
+async function changePassword() {
+  passwordError.value = ''
+  passwordNotice.value = ''
+  if (passwordForm.next.length < 6) {
+    passwordError.value = 'Password must be at least 6 characters'
+    return
+  }
+  if (passwordForm.next !== passwordForm.confirm) {
+    passwordError.value = 'Passwords do not match'
+    return
+  }
+  passwordSaving.value = true
+  try {
+    await authStore.changePassword(passwordForm.current, passwordForm.next)
+    passwordForm.current = ''
+    passwordForm.next = ''
+    passwordForm.confirm = ''
+    passwordNotice.value = 'Password changed.'
+  } catch (e: any) {
+    passwordError.value =
+      e.response?.data?.message || e.response?.data?.error || 'Password change failed'
+  } finally {
+    passwordSaving.value = false
+  }
+}
 
 // Per-user identity used to derive fixed paths. We fall back to 'default'
 // if the auth store hasn't been hydrated yet (shouldn't happen in practice
