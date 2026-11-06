@@ -975,7 +975,7 @@ defineExpose({ startTextExport, openSessionExportModal })
   gap: 8px;
 }
 
-.export-btn, .export-text-btn {
+.export-btn, .detail-btn {
   padding: 4px 14px;
   border: 1px solid #e94560;
   border-radius: 4px;
@@ -1007,7 +1007,7 @@ defineExpose({ startTextExport, openSessionExportModal })
   opacity: 0.4;
   cursor: not-allowed;
 }
-.export-btn:hover:not(:disabled), .export-text-btn:hover:not(:disabled) {
+.export-btn:hover:not(:disabled), .detail-btn:hover:not(:disabled) {
   background: #e94560;
   color: #fff;
 }
@@ -1015,7 +1015,7 @@ defineExpose({ startTextExport, openSessionExportModal })
   background: #4a90d9;
   color: #fff;
 }
-.export-btn:disabled, .export-text-btn:disabled {
+.export-btn:disabled, .detail-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
