@@ -59,174 +59,6 @@
       </tbody>
     </table>
 
-    <!-- Text export options modal -->
-    <div v-if="textExportModal.show" class="modal-overlay" @click.self="closeTextExportModal">
-      <div class="modal-content">        <div class="modal-header">
-          <h3>Export Text — {{ textExportModal.projectName }}</h3>
-          <button class="modal-close" @click="closeTextExportModal">×</button>
-        </div>
-
-        <!-- Status check result -->
-        <div v-if="textExportModal.statusLoading" class="status-checking">
-          Checking export availability…
-        </div>
-        <div v-else-if="textExportModal.statusError" class="status-error">
-          {{ textExportModal.statusError }}
-        </div>
-        <div v-else-if="textExportModal.status" class="status-section">
-          <div :class="['status-badge', textExportModal.status.state]">
-            {{ textExportModal.status.state }}
-          </div>
-          <div v-if="textExportModal.status.state !== 'available'" class="status-reasons">
-            <div v-for="reason in textExportModal.status.reasons" :key="reason.code" class="status-reason">
-              <span class="reason-code">{{ reason.code }}</span>
-              <span v-if="reason.activeProject" class="reason-detail">
-                (active project: {{ reason.activeProject }})
-              </span>
-            </div>
-            <div v-for="hint in textExportModal.status.hints" :key="hint" class="status-hint">
-              {{ hint }}
-            </div>
-          </div>
-        </div>
-
-        <!-- Export options (only when available) -->
-        <div v-if="textExportModal.status?.state === 'available'" class="export-options">
-          <div class="option-group">
-            <label class="option-group-label">Content</label>
-            <div class="checkbox-list">
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.contents" value="listing" />
-                Listing (disassembly)
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.contents" value="functions" />
-                Functions list
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.contents" value="comments" />
-                Comments
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.contents" value="decompile" />
-                Decompile (C pseudo-code)
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.contents" value="data" />
-                Data
-              </label>
-            </div>
-          </div>
-
-          <div v-if="exportOptions.contents.includes('comments')" class="option-group">
-            <label class="option-group-label">Comment types</label>
-            <div class="checkbox-list">
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.includeEolComment" /> EOL
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.includePlateComment" /> Plate
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.includePreComment" /> Pre
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.includePostComment" /> Post
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="exportOptions.includeRepeatableComment" /> Repeatable
-              </label>
-            </div>
-          </div>
-
-          <div v-if="exportOptions.contents.includes('decompile')" class="option-group">
-            <label class="option-group-label">Decompile timeout (seconds)</label>
-            <input
-              type="number"
-              v-model.number="exportOptions.decompileTimeoutSec"
-              min="1"
-              max="600"
-              class="text-input"
-            />
-          </div>
-
-          <div class="option-group">
-            <label class="option-group-label">Function filter (regex, optional)</label>
-            <input
-              type="text"
-              v-model="exportOptions.functionFilter"
-              placeholder="e.g. ^main$|^parse_"
-              class="text-input"
-            />
-          </div>
-
-          <div class="option-group">
-            <label class="option-group-label">Address filter (optional)</label>
-            <div class="address-filter-row">
-              <input
-                type="text"
-                v-model="exportOptions.addressFilterStart"
-                placeholder="start (hex, e.g. 0x401000)"
-                class="text-input"
-              />
-              <span class="address-filter-sep">—</span>
-              <input
-                type="text"
-                v-model="exportOptions.addressFilterEnd"
-                placeholder="end (hex, e.g. 0x402000)"
-                class="text-input"
-              />
-            </div>
-          </div>
-
-          <div class="option-group">
-            <label class="option-group-label">Limits</label>
-            <div class="limits-row">
-              <div class="limit-item">
-                <label>Max functions (0 = unlimited)</label>
-                <input
-                  type="number"
-                  v-model.number="exportOptions.maxFunctions"
-                  min="0"
-                  class="text-input"
-                />
-              </div>
-              <div class="limit-item">
-                <label>Max function size (bytes)</label>
-                <input
-                  type="number"
-                  v-model.number="exportOptions.maxFunctionSize"
-                  min="1"
-                  class="text-input"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div class="option-group">
-            <label class="option-group-label">Sort by</label>
-            <select v-model="exportOptions.sortBy" class="text-input">
-              <option value="address">Address</option>
-              <option value="name">Name</option>
-              <option value="size">Size (descending)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="btn-secondary" @click="closeTextExportModal">Cancel</button>
-          <button
-            v-if="textExportModal.status?.state === 'available'"
-            class="btn-primary"
-            @click="doTextExport"
-            :disabled="textExportModal.exporting"
-          >
-            {{ textExportModal.exporting ? 'Exporting…' : 'Export' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- .gar import result modal -->
     <div v-if="garImportResult" class="modal-overlay" @click.self="closeGarImportModal">
       <div class="modal-content">
@@ -277,55 +109,6 @@
         <div class="gar-error-body">{{ garImportError }}</div>
         <div class="modal-footer">
           <button class="btn-primary" @click="closeGarImportModal">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Batch session export modal -->
-    <div v-if="sessionExportModal.show" class="modal-overlay" @click.self="closeSessionExportModal">
-      <div class="modal-content session-export-modal">
-        <div class="modal-header">
-          <h3>Export Sessions — {{ sessionExportModal.projectName }}</h3>
-          <button class="modal-close" @click="closeSessionExportModal">×</button>
-        </div>
-        <div class="session-export-body">
-          <div v-if="sessionExportModal.loading" class="status-checking">Loading sessions…</div>
-          <div v-else-if="sessionExportModal.error" class="status-error">{{ sessionExportModal.error }}</div>
-          <div v-else-if="sessionExportModal.sessions.length === 0" class="status-checking">
-            No agent sessions found for this project.
-          </div>
-          <template v-else>
-            <label class="session-row session-select-all">
-              <input
-                type="checkbox"
-                :checked="allSessionsSelected"
-                @change="toggleSelectAllSessions"
-              />
-              <span class="session-name">Select all ({{ sessionExportModal.sessions.length }})</span>
-            </label>
-            <div class="session-list">
-              <label v-for="s in sessionExportModal.sessions" :key="s.sessionId" class="session-row">
-                <input
-                  type="checkbox"
-                  :checked="sessionExportModal.selected.includes(s.sessionId)"
-                  @change="toggleSessionSelected(s.sessionId)"
-                />
-                <span class="session-name">{{ s.sessionName || s.sessionId.slice(0, 8) }}</span>
-                <span class="session-meta">{{ s.status }}</span>
-                <span class="session-meta">{{ s.createdAt?.slice(0, 16).replace('T', ' ') || '' }}</span>
-              </label>
-            </div>
-          </template>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-secondary" @click="closeSessionExportModal" :disabled="sessionExportModal.exporting">Cancel</button>
-          <button
-            class="btn-primary"
-            @click="doSessionExport"
-            :disabled="sessionExportModal.exporting || sessionExportModal.selected.length === 0"
-          >
-            {{ sessionExportModal.exporting ? 'Exporting…' : `Export ${sessionExportModal.selected.length || ''} session(s)` }}
-          </button>
         </div>
       </div>
     </div>
@@ -409,6 +192,29 @@
           <button class="btn-secondary" :disabled="details.loading" @click="loadTree">Refresh</button>
         </div>
 
+        <div class="details-import">
+          <select v-model="importBinaryId" class="details-input" :disabled="binariesLoading || details.importing">
+            <option :value="null">
+              {{ binariesLoading ? 'Loading binaries…' : 'Select a binary…' }}
+            </option>
+            <option v-for="b in binaries" :key="b.id" :value="b.id">
+              {{ b.name }} (#{{ b.id }})
+            </option>
+          </select>
+          <input
+            v-model="importFolder"
+            class="details-input import-target"
+            placeholder="Target folder (root)"
+          />
+          <button
+            class="btn-primary"
+            :disabled="importBinaryId === null || details.importing"
+            @click="importBinary"
+          >
+            {{ details.importing ? 'Importing…' : 'Import binary' }}
+          </button>
+        </div>
+
         <div v-if="details.error" class="details-banner">{{ details.error }}</div>
 
         <ul class="tree">
@@ -416,7 +222,9 @@
             v-for="e in details.entries"
             :key="e.path"
             class="tree-row"
+            :class="{ 'tree-row-target': e.folder && details.selectedFolder === e.path }"
             :style="{ paddingLeft: 10 + depthOf(e) * 18 + 'px' }"
+            @click="selectFolder(e)"
           >
             <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
 
@@ -433,8 +241,8 @@
 
             <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
             <span v-if="editingPath !== e.path" class="tree-actions">
-              <button class="link-btn" @click="startRename(e)">rename</button>
-              <button class="link-btn danger" @click="deleteEntry(e)">delete</button>
+              <button class="link-btn" @click.stop="startRename(e)">rename</button>
+              <button class="link-btn danger" @click.stop="deleteEntry(e)">delete</button>
             </span>
             <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
           </li>
@@ -448,30 +256,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
-import { projectApi } from '@/services/api'
-import type { ExportTextStatus, ProjectSessionInfo } from '@/services/api'
+import { ref, reactive, nextTick, onMounted } from 'vue'
+import { projectApi, fileApi } from '@/services/api'
+import type { FileEntry } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
 
 const projects = ref<GhidraProjectInfo[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const exporting = ref<string | null>(null)
-const textExporting = ref<string | null>(null)
 const workspaceExporting = ref<string | null>(null)
-const sessionExporting = ref<string | null>(null)
 const deleting = ref<string | null>(null)
-
-// --- Batch session export modal state ---
-const sessionExportModal = reactive({
-  show: false,
-  projectName: '',
-  loading: false,
-  error: null as string | null,
-  sessions: [] as ProjectSessionInfo[],
-  selected: [] as string[],
-  exporting: false,
-})
 
 // --- Delete project modal state ---
 const deleteModal = reactive({
@@ -499,35 +294,11 @@ const garImportResult = ref<{
 } | null>(null)
 const garImportError = ref<string | null>(null)
 
-// --- Text export modal state ---
-const textExportModal = reactive({
-  show: false,
-  projectName: '',
-  statusLoading: false,
-  statusError: null as string | null,
-  status: null as ExportTextStatus | null,
-  exporting: false,
-})
-
-const exportOptions = reactive({
-  contents: ['listing', 'comments', 'functions'] as string[],
-  includeComments: true,
-  includeEolComment: true,
-  includePlateComment: true,
-  includePreComment: true,
-  includePostComment: false,
-  includeRepeatableComment: false,
-  includeDecompile: false,
-  decompileTimeoutSec: 30,
-  includeData: true,
-  includeUndefined: false,
-  functionFilter: '' as string,
-  addressFilterStart: '' as string,
-  addressFilterEnd: '' as string,
-  maxFunctions: 0,
-  maxFunctionSize: 1 << 20,
-  sortBy: 'address',
-})
+// --- Binary import state ---
+const binaries = ref<FileEntry[]>([])
+const binariesLoading = ref(false)
+const importBinaryId = ref<number | null>(null)
+const importFolder = ref('')
 
 async function fetchProjects() {
   loading.value = true
@@ -614,151 +385,6 @@ async function exportWorkspace(name: string) {
     alert(`Workspace export failed: ${msg}`)
   } finally {
     workspaceExporting.value = null
-  }
-}
-
-async function startTextExport(name: string) {
-  textExporting.value = name
-  textExportModal.show = true
-  textExportModal.projectName = name
-  textExportModal.statusLoading = true
-  textExportModal.statusError = null
-  textExportModal.status = null
-  textExportModal.exporting = false
-
-  try {
-    const res = await projectApi.exportTextStatus(name)
-    textExportModal.status = res.data
-  } catch (e: any) {
-    textExportModal.statusError = e.response?.data?.error ?? e.message ?? 'Failed to check export status'
-  } finally {
-    textExportModal.statusLoading = false
-  }
-}
-
-function closeTextExportModal() {
-  if (textExportModal.exporting) return
-  textExportModal.show = false
-  textExportModal.projectName = ''
-  textExportModal.status = null
-  textExportModal.statusError = null
-  textExporting.value = null
-}
-
-async function doTextExport() {
-  if (!textExportModal.projectName) return
-  textExportModal.exporting = true
-
-  try {
-    const opts = {
-      format: 'zip',
-      contents: exportOptions.contents,
-      includeComments: exportOptions.includeComments,
-      includeEolComment: exportOptions.includeEolComment,
-      includePlateComment: exportOptions.includePlateComment,
-      includePreComment: exportOptions.includePreComment,
-      includePostComment: exportOptions.includePostComment,
-      includeRepeatableComment: exportOptions.includeRepeatableComment,
-      includeDecompile: exportOptions.includeDecompile,
-      decompileTimeoutSec: exportOptions.decompileTimeoutSec,
-      includeData: exportOptions.includeData,
-      includeUndefined: exportOptions.includeUndefined,
-      functionFilter: exportOptions.functionFilter.trim() || null,
-      addressFilter: (exportOptions.addressFilterStart.trim() && exportOptions.addressFilterEnd.trim())
-        ? { start: exportOptions.addressFilterStart.trim(), end: exportOptions.addressFilterEnd.trim() }
-        : null,
-      maxFunctions: exportOptions.maxFunctions,
-      maxFunctionSize: exportOptions.maxFunctionSize,
-      sortBy: exportOptions.sortBy,
-    }
-
-    const res = await projectApi.exportText(textExportModal.projectName, opts)
-    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${textExportModal.projectName}-export_text.zip`
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
-    closeTextExportModal()
-  } catch (e: any) {
-    const msg = e.response?.data?.error ?? e.message ?? 'Text export failed'
-    alert(`Text export failed: ${msg}`)
-  } finally {
-    textExportModal.exporting = false
-  }
-}
-
-async function openSessionExportModal(name: string) {
-  sessionExporting.value = name
-  sessionExportModal.show = true
-  sessionExportModal.projectName = name
-  sessionExportModal.loading = true
-  sessionExportModal.error = null
-  sessionExportModal.sessions = []
-  sessionExportModal.selected = []
-  sessionExportModal.exporting = false
-  try {
-    const res = await projectApi.sessions(name)
-    sessionExportModal.sessions = res.data.sessions ?? []
-    // Default to everything selected — the common case is a full export.
-    sessionExportModal.selected = sessionExportModal.sessions.map(s => s.sessionId)
-  } catch (e: any) {
-    sessionExportModal.error = e.response?.data?.error ?? e.message ?? 'Failed to load sessions'
-  } finally {
-    sessionExportModal.loading = false
-  }
-}
-
-function closeSessionExportModal() {
-  if (sessionExportModal.exporting) return
-  sessionExportModal.show = false
-  sessionExportModal.projectName = ''
-  sessionExportModal.sessions = []
-  sessionExportModal.selected = []
-  sessionExporting.value = null
-}
-
-const allSessionsSelected = computed(() =>
-  sessionExportModal.sessions.length > 0 &&
-  sessionExportModal.selected.length === sessionExportModal.sessions.length
-)
-
-function toggleSelectAllSessions() {
-  sessionExportModal.selected = allSessionsSelected.value
-    ? []
-    : sessionExportModal.sessions.map(s => s.sessionId)
-}
-
-function toggleSessionSelected(id: string) {
-  const idx = sessionExportModal.selected.indexOf(id)
-  if (idx >= 0) sessionExportModal.selected.splice(idx, 1)
-  else sessionExportModal.selected.push(id)
-}
-
-async function doSessionExport() {
-  if (!sessionExportModal.projectName || sessionExportModal.selected.length === 0) return
-  sessionExportModal.exporting = true
-  try {
-    const res = await projectApi.exportSessions(sessionExportModal.projectName, sessionExportModal.selected)
-    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${sessionExportModal.projectName}-sessions.zip`
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
-    sessionExportModal.exporting = false
-    closeSessionExportModal()
-  } catch (e: any) {
-    const msg = e.response?.data?.error ?? e.message ?? 'Session export failed'
-    alert(`Session export failed: ${msg}`)
-  } finally {
-    sessionExportModal.exporting = false
   }
 }
 
@@ -850,8 +476,10 @@ const details = reactive({
   folders: 0,
   files: 0,
   newFolder: '',
+  selectedFolder: '',
   loading: false,
   busy: false,
+  importing: false,
   stale: false,
   error: null as string | null,
 })
@@ -880,11 +508,52 @@ async function openDetails() {
   details.open = true
   details.project = name
   details.newFolder = ''
-  await loadTree()
+  details.selectedFolder = ''
+  importBinaryId.value = null
+  importFolder.value = ''
+  await Promise.all([loadTree(), loadBinaries()])
 }
 
 function closeDetails() {
   details.open = false
+}
+
+/** Available binaries of the selected instance, for the import control. */
+async function loadBinaries() {
+  binariesLoading.value = true
+  try {
+    const res = await fileApi.list(0, 500)
+    binaries.value = res.data.files ?? []
+  } catch (e: any) {
+    binaries.value = []
+    details.error = e?.response?.data?.error || 'Failed to load binaries'
+  } finally {
+    binariesLoading.value = false
+  }
+}
+
+/** Point the import control at a folder when its tree row is clicked. */
+function selectFolder(e: TreeEntry) {
+  if (!e.folder || editingPath.value !== null) return
+  details.selectedFolder = e.path
+  importFolder.value = e.path
+}
+
+async function importBinary() {
+  if (importBinaryId.value === null) return
+  details.importing = true
+  details.error = null
+  try {
+    await projectApi.importBinary(details.project, {
+      binaryId: String(importBinaryId.value),
+      folder: importFolder.value.trim(),
+    })
+    await loadTree()
+  } catch (e: any) {
+    details.error = e?.response?.data?.error || String(e)
+  } finally {
+    details.importing = false
+  }
 }
 
 async function loadTree() {
@@ -964,12 +633,6 @@ async function deleteEntry(e: TreeEntry) {
     details.error = err?.response?.data?.error || String(err)
   }
 }
-
-
-// The text and session exports lost their per-row buttons (the toolbar only
-// keeps gar / workspace / delete).  Their modals are retained and can still be
-// driven through the component ref, so the capability is not lost.
-defineExpose({ startTextExport, openSessionExportModal })
 </script>
 
 <style scoped>
@@ -1058,10 +721,6 @@ defineExpose({ startTextExport, openSessionExportModal })
   font-size: 13px;
   white-space: nowrap;
 }
-.export-text-btn {
-  border-color: #4a90d9;
-  color: #4a90d9;
-}
 .export-workspace-btn {
   padding: 4px 14px;
   border: 1px solid #6c757d;
@@ -1084,73 +743,9 @@ defineExpose({ startTextExport, openSessionExportModal })
   background: #e94560;
   color: #fff;
 }
-.export-text-btn:hover:not(:disabled) {
-  background: #4a90d9;
-  color: #fff;
-}
 .export-btn:disabled, .detail-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-.export-sessions-btn {
-  padding: 4px 14px;
-  border: 1px solid #2e7d32;
-  border-radius: 4px;
-  background: #fff;
-  color: #2e7d32;
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
-}
-.export-sessions-btn:hover:not(:disabled) {
-  background: #2e7d32;
-  color: #fff;
-}
-.export-sessions-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* --- Batch session export --- */
-.session-export-modal {
-  width: 640px;
-}
-.session-export-body {
-  padding: 12px 24px;
-}
-.session-select-all {
-  font-weight: 600;
-  border-bottom: 1px solid #eaeaea;
-  padding-bottom: 8px;
-  margin-bottom: 4px;
-}
-.session-list {
-  max-height: 50vh;
-  overflow-y: auto;
-}
-.session-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  font-size: 13px;
-  cursor: pointer;
-  color: #333;
-}
-.session-row input {
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.session-row .session-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-row .session-meta {
-  color: #999;
-  font-size: 12px;
-  flex-shrink: 0;
 }
 
 /* --- Modal --- */
@@ -1197,138 +792,6 @@ defineExpose({ startTextExport, openSessionExportModal })
   line-height: 1;
 }
 .modal-close:hover { color: #333; }
-
-.status-checking {
-  padding: 24px;
-  text-align: center;
-  color: #999;
-}
-.status-error {
-  padding: 16px 24px;
-  color: #e94560;
-  font-size: 13px;
-}
-.status-section {
-  padding: 16px 24px;
-}
-.status-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.status-badge.available {
-  background: #e8f5e9;
-  color: #2e7d32;
-  border: 1px solid #a5d6a7;
-}
-.status-badge.in_use {
-  background: #fff3e0;
-  color: #e65100;
-  border: 1px solid #ffb74d;
-}
-.status-badge.project_not_found {
-  background: #ffebee;
-  color: #c62828;
-  border: 1px solid #ef9a9a;
-}
-.status-reasons {
-  margin-top: 12px;
-}
-.status-reason {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 4px;
-}
-.reason-code {
-  font-family: monospace;
-  color: #e65100;
-}
-.reason-detail {
-  color: #999;
-}
-.status-hint {
-  font-size: 12px;
-  color: #999;
-  margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid #e0e0e0;
-}
-
-.export-options {
-  padding: 16px 24px;
-  border-top: 1px solid #eaeaea;
-}
-.option-group {
-  margin-bottom: 16px;
-}
-.option-group-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: #555;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.checkbox-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-}
-.checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  color: #333;
-}
-.checkbox-item input {
-  cursor: pointer;
-}
-
-.text-input {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 13px;
-  outline: none;
-}
-.text-input:focus {
-  border-color: #4a90d9;
-}
-select.text-input {
-  cursor: pointer;
-}
-
-.address-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.address-filter-sep {
-  color: #999;
-  font-size: 13px;
-}
-
-.limits-row {
-  display: flex;
-  gap: 16px;
-}
-.limit-item {
-  flex: 1;
-}
-.limit-item label {
-  display: block;
-  font-size: 11px;
-  color: #999;
-  margin-bottom: 4px;
-}
 
 .modal-footer {
   display: flex;
@@ -1565,6 +1028,10 @@ select.text-input {
   font-size: 12px;
 }
 .details-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
+.details-import { display: flex; gap: 8px; margin-bottom: 10px; }
+.details-import .details-input { flex: 1; }
+.details-import .import-target { flex: 0 0 220px; }
+.tree-row.tree-row-target { background: rgba(64, 132, 214, 0.18); }
 .details-input {
   flex: 1;
   padding: 6px 8px;

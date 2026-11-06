@@ -409,16 +409,12 @@ export const projectApi = {
     api.get(`/projects/${encodeURIComponent(name)}/export`, { responseType: 'blob' }),
   exportWorkspace: (name: string) =>
     api.get(`/projects/${encodeURIComponent(name)}/export_workspace`, { responseType: 'blob' }),
-  exportTextStatus: (name: string) =>
-    api.get<ExportTextStatus>(`/projects/${encodeURIComponent(name)}/export_text/status`),
-  exportText: (name: string, options: ExportTextRequest) =>
-    api.post(`/projects/${encodeURIComponent(name)}/export_text`, options, { responseType: 'blob' }),
-  /** List the agent sessions that worked on a project (batch-export dialog). */
-  sessions: (name: string) =>
-    api.get<{ sessions: ProjectSessionInfo[] }>(`/projects/${encodeURIComponent(name)}/sessions`),
-  /** Batch-export the selected sessions as a ZIP of tree-form Markdown transcripts. */
-  exportSessions: (name: string, sessionIds: string[]) =>
-    api.post(`/projects/${encodeURIComponent(name)}/export_sessions`, { sessionIds }, { responseType: 'blob' }),
+  /** Import a binary from the selected instance into a project folder. */
+  importBinary: (name: string, payload: { binaryId: string; folder?: string; asName?: string }) =>
+    api.post<{ target: string; program: string; folder: string }>(
+      `/projects/${encodeURIComponent(name)}/programs/import`,
+      payload
+    ),
   /**
    * Import a `.gar` (Ghidra Archive) as a standalone project. The backend
    * extracts the archive, registers every program in the binaries table
@@ -437,51 +433,6 @@ export const projectApi = {
     api.delete(`/projects/${encodeURIComponent(name)}`, {
       params: { deleteLogs, deleteAgentSessions, deleteWorkspace },
     }),
-}
-
-export interface ProjectSessionInfo {
-  sessionId: string
-  sessionName: string | null
-  status: string
-  modelName: string | null
-  createdAt: string | null
-}
-
-export interface ExportTextStatus {
-  projectName: string
-  projectExists: boolean
-  state: string  // "available" | "in_use" | "project_not_found"
-  activeProject: string | null
-  reasons: ExportTextReason[]
-  hints: string[]
-  agentSessionsChecked: boolean
-}
-
-export interface ExportTextReason {
-  code: string
-  activeProject?: string | null
-  workflows?: Array<Record<string, string | null>>
-  sessions?: Array<Record<string, string | null>>
-}
-
-export interface ExportTextRequest {
-  format?: string
-  contents?: string[]
-  includeComments?: boolean
-  includeEolComment?: boolean
-  includePlateComment?: boolean
-  includePreComment?: boolean
-  includePostComment?: boolean
-  includeRepeatableComment?: boolean
-  includeDecompile?: boolean
-  decompileTimeoutSec?: number
-  includeData?: boolean
-  includeUndefined?: boolean
-  functionFilter?: string | null
-  addressFilter?: { start: string; end: string } | null
-  maxFunctions?: number
-  maxFunctionSize?: number
-  sortBy?: string
 }
 
 export interface FileSearchResult {
