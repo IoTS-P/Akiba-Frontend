@@ -16,6 +16,21 @@
         <button class="refresh-btn" @click="fetchProjects" :disabled="loading">Refresh</button>
       </div>
     </div>
+    <div class="project-toolbar">
+      <button class="detail-btn" :disabled="selected.size !== 1" @click="openDetails">
+        Details
+      </button>
+      <button class="export-btn" :disabled="selected.size === 0 || exporting !== null" @click="exportSelected">
+        {{ exporting ? 'Exporting…' : 'Export .gar' }}
+      </button>
+      <button class="export-workspace-btn" :disabled="selected.size === 0 || workspaceExporting !== null" @click="exportWorkspaceSelected">
+        {{ workspaceExporting ? 'Exporting…' : 'Export Workspace' }}
+      </button>
+      <button class="delete-project-btn" :disabled="selected.size === 0 || deleting !== null" @click="deleteSelected">
+        Delete{{ selected.size > 1 ? ` (${selected.size})` : '' }}
+      </button>
+      <span class="toolbar-hint">{{ selected.size }} selected · Ctrl+click to add</span>
+    </div>
     <div v-if="loading" class="loading">Loading projects…</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     <div v-else-if="projects.length === 0" class="empty">
@@ -27,51 +42,19 @@
           <th>Project Name</th>
           <th>Sessions</th>
           <th>Files</th>
-          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="project in projects" :key="project.name">
+        <tr
+          v-for="project in projects"
+          :key="project.name"
+          class="project-row"
+          :class="{ 'row-selected': selected.has(project.name) }"
+          @click="toggleRow(project.name, $event)"
+        >
           <td class="project-name">{{ project.name }}</td>
           <td>{{ project.sessionCount }}</td>
           <td>{{ project.fileCount }}</td>
-          <td class="actions-cell">
-            <button
-              class="export-btn"
-              @click="exportProject(project.name)"
-              :disabled="exporting === project.name"
-            >
-              {{ exporting === project.name ? 'Exporting…' : 'Export .gar' }}
-            </button>
-            <button
-              class="export-text-btn"
-              @click="startTextExport(project.name)"
-              :disabled="textExporting === project.name"
-            >
-              {{ textExporting === project.name ? 'Exporting…' : 'Export Text' }}
-            </button>
-            <button
-              class="export-workspace-btn"
-              @click="exportWorkspace(project.name)"
-              :disabled="workspaceExporting === project.name"
-            >
-              {{ workspaceExporting === project.name ? 'Exporting…' : 'Export Workspace' }}
-            </button>
-            <button
-              class="export-sessions-btn"
-              @click="openSessionExportModal(project.name)"
-              :disabled="sessionExporting === project.name"
-            >
-              {{ sessionExporting === project.name ? 'Exporting…' : 'Export Sessions' }}
-            </button>
-            <button
-              class="delete-project-btn"
-              @click="openDeleteModal(project.name)"
-              :disabled="deleting === project.name"
-            >
-              {{ deleting === project.name ? 'Deleting…' : 'Delete' }}
-            </button>
-          </td>
         </tr>
       </tbody>
     </table>
@@ -400,6 +383,35 @@
             {{ deleteModal.deleting ? 'Deleting…' : 'Delete Project' }}
           </button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="details.open" class="modal-overlay" @click.self="closeDetails">
+      <div class="modal details-modal">
+        <div class="modal-header">
+          <h3>Project: {{ details.project }}</h3>
+          <button class="modal-close" @click="closeDetails">×</button>
+        </div>
+        <div class="details-toolbar">
+          <input v-model="details.newFolder" class="details-input" placeholder="New folder name" />
+          <button class="btn-secondary" :disabled="!details.newFolder.trim()" @click="createFolder">
+            New Folder
+          </button>
+          <button class="btn-secondary" :disabled="details.loading" @click="loadTree">Refresh</button>
+        </div>
+        <div v-if="details.error" class="error">{{ details.error }}</div>
+        <ul class="tree">
+          <li v-for="e in details.entries" :key="e.path" :style="{ paddingLeft: 8 + depthOf(e) * 16 + 'px' }">
+            <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
+            <span class="tree-name">{{ e.name }}</span>
+            <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
+            <span class="tree-actions">
+              <button class="link-btn" @click="renameEntry(e)">rename</button>
+              <button class="link-btn danger" @click="deleteEntry(e)">delete</button>
+            </span>
+          </li>
+          <li v-if="details.entries.length === 0" class="tree-empty">Empty project — no programs yet.</li>
+        </ul>
       </div>
     </div>
   </div>
@@ -755,6 +767,136 @@ async function confirmDelete() {
 }
 
 onMounted(fetchProjects)
+// ---------------------------------------------------------------
+// Selection + the Ghidra-style project browser
+// ---------------------------------------------------------------
+const selected = ref<Set<string>>(new Set())
+
+function toggleRow(name: string, ev: MouseEvent) {
+  const next = new Set(selected.value)
+  if (ev.ctrlKey || ev.metaKey) {
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+  } else {
+    next.clear()
+    next.add(name)
+  }
+  selected.value = next
+}
+
+async function exportSelected() {
+  for (const name of [...selected.value]) {
+    try { await exportProject(name) } catch (e) { console.error(e) }
+  }
+}
+
+async function exportWorkspaceSelected() {
+  for (const name of [...selected.value]) {
+    try { await exportWorkspace(name) } catch (e) { console.error(e) }
+  }
+}
+
+async function deleteSelected() {
+  const names = [...selected.value]
+  if (names.length === 0) return
+  if (names.length === 1) { openDeleteModal(names[0]); return }
+  if (!confirm(`Delete ${names.length} projects? This cannot be undone.`)) return
+  deleting.value = names[0]
+  try {
+    for (const name of names) await projectApi.deleteProject(name)
+    selected.value = new Set()
+    await fetchProjects()
+  } finally {
+    deleting.value = null
+  }
+}
+
+interface TreeEntry { path: string; name: string; folder: boolean; size: number }
+
+const details = reactive({
+  open: false,
+  project: '',
+  entries: [] as TreeEntry[],
+  newFolder: '',
+  loading: false,
+  error: null as string | null,
+})
+
+function depthOf(e: TreeEntry): number {
+  return e.path.split('/').length - 1
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function openDetails() {
+  const name = [...selected.value][0]
+  if (!name) return
+  details.open = true
+  details.project = name
+  details.newFolder = ''
+  await loadTree()
+}
+
+function closeDetails() {
+  details.open = false
+}
+
+async function loadTree() {
+  details.loading = true
+  details.error = null
+  try {
+    const res = await projectApi.tree(details.project)
+    details.entries = res.data.entries
+  } catch (e: any) {
+    details.error = e?.response?.data?.error || String(e)
+  } finally {
+    details.loading = false
+  }
+}
+
+async function createFolder() {
+  const name = details.newFolder.trim()
+  if (!name) return
+  try {
+    await projectApi.createFolder(details.project, '', name)
+    details.newFolder = ''
+    await loadTree()
+  } catch (e: any) {
+    details.error = e?.response?.data?.error || String(e)
+  }
+}
+
+async function renameEntry(e: TreeEntry) {
+  const to = prompt(`Rename '${e.name}' to:`, e.name)
+  if (!to || to === e.name) return
+  try {
+    await projectApi.renameEntry(details.project, e.path, to)
+    await loadTree()
+  } catch (err: any) {
+    details.error = err?.response?.data?.error || String(err)
+  }
+}
+
+async function deleteEntry(e: TreeEntry) {
+  if (!confirm(`Delete '${e.path}' from this project? This cannot be undone.`)) return
+  try {
+    await projectApi.deleteEntry(details.project, e.path)
+    await loadTree()
+  } catch (err: any) {
+    details.error = err?.response?.data?.error || String(err)
+  }
+}
+
+
+// The text and session exports lost their per-row buttons (the toolbar only
+// keeps gar / workspace / delete).  Their modals are retained and can still be
+// driven through the component ref, so the capability is not lost.
+defineExpose({ startTextExport, openSessionExportModal })
 </script>
 
 <style scoped>
@@ -1278,4 +1420,52 @@ select.text-input {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---- project selection + browser ---- */
+.project-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.project-toolbar .toolbar-hint {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.65;
+}
+.project-row { cursor: pointer; }
+.project-row.row-selected { background: rgba(64, 132, 214, 0.16); }
+.details-modal { width: min(720px, 92vw); }
+.details-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
+.details-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+.tree { list-style: none; margin: 0; padding: 0; max-height: 52vh; overflow: auto; }
+.tree li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.tree li:hover { background: rgba(128, 128, 128, 0.12); }
+.tree-icon { width: 18px; }
+.tree-name { flex: 1; font-family: ui-monospace, monospace; font-size: 13px; }
+.tree-size { font-size: 12px; opacity: 0.6; }
+.tree-actions { display: flex; gap: 6px; }
+.tree-empty { opacity: 0.6; font-size: 13px; }
+.link-btn {
+  background: none;
+  border: none;
+  color: #4084d6;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.link-btn.danger { color: #d9534f; }
 </style>

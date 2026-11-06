@@ -393,6 +393,16 @@ export const fileApi = {
 
 export const projectApi = {
   list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
+  /** Folder tree of a project (Ghidra projects are folder trees, not flat lists). */
+  tree: (projectName: string) =>
+    api.get<{ entries: { path: string; name: string; folder: boolean; size: number }[] }>(
+      `/projects/${encodeURIComponent(projectName)}/tree`),
+  createFolder: (projectName: string, parentPath: string, name: string) =>
+    api.post<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/folders`, { path: parentPath, name }),
+  renameEntry: (projectName: string, path: string, newName: string) =>
+    api.patch<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/entries`, { path, newName }),
+  deleteEntry: (projectName: string, path: string) =>
+    api.delete<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/entries?path=${encodeURIComponent(path)}`),
   programs: (projectName: string) =>
     api.get<{ programs: { name: string; path: string }[] }>(`/projects/${encodeURIComponent(projectName)}/programs`),
   exportProject: (name: string) =>
