@@ -22,21 +22,6 @@
             placeholder="Select project…"
             @change="onProjectFilterChange"
           />
-          <FilterDropdown
-            v-model="workflowFilter"
-            :options="workflowOptions"
-            placeholder="All workflows"
-            all-label="All workflows"
-            :disabled="projectFilter === null"
-            @change="onWorkflowFilterChange"
-          />
-          <FilterDropdown
-            v-model="moduleFilter"
-            :options="moduleOptions"
-            placeholder="All modules"
-            all-label="All modules"
-            :disabled="projectFilter === null"
-          />
           <label class="session-filter-running" title="Show only session trees that contain a running agent (across all projects)">
             <input type="checkbox" v-model="onlyRunningTrees" />
             <span class="running-dot-inline" :class="{ active: onlyRunningTrees }"></span>
@@ -107,10 +92,6 @@
               class="subagent-tag"
               title="This is a sub-agent session (child of another session)"
             >🧩 sub-agent</span>
-            <span
-              v-if="hoveredSession.moduleName && hoveredSession.moduleName !== 'chat'"
-              class="module-tag"
-            >{{ hoveredSession.moduleName }}</span>
           </div>
           <div class="hover-card-row hover-card-time">
             {{ formatTime(hoveredSession.updatedAt || hoveredSession.createdAt) || '—' }}
@@ -163,9 +144,6 @@
               class="chat-title-name"
               :title="activeSessionMeta ? `Agent UUID: ${activeSessionMeta.sessionId}` : ''"
             >{{ activeSessionName }}</span>
-            <span v-if="activeSessionMeta" class="chat-title-meta">
-              {{ activeSessionMeta.moduleName || 'chat' }}
-            </span>
             <span v-if="activeSessionMeta?.parentSessionId" class="chat-title-meta">
               ·
               <button
@@ -655,12 +633,8 @@ function findSessionById(id: string | null | undefined): AgentSession | undefine
  * is the way to LOCATE a session whose project is unknown.
  */
 const NO_PROJECT = '__no_project__'      // sessions with a null/blank projectName
-const NO_WORKFLOW = '__no_workflow__'    // interactive / legacy sessions (no workflowId)
-const NO_MODULE = '__no_module__'        // sessions with a null/blank moduleName
 
 const projectFilter = ref<string | null>(null)
-const workflowFilter = ref<string | null>(null)
-const moduleFilter = ref<string | null>(null)
 const searchQuery = ref('')
 /** Ids returned by the last backend search; null = not searching. */
 const searchMatchIds = ref<Set<string> | null>(null)
@@ -711,14 +685,6 @@ function projectKeyOf(s: AgentSession): string {
   const v = s.projectName?.trim()
   return v ? v : NO_PROJECT
 }
-function workflowKeyOf(s: AgentSession): string {
-  const v = s.workflowId?.trim()
-  return v ? v : NO_WORKFLOW
-}
-function moduleKeyOf(s: AgentSession): string {
-  const v = s.moduleName?.trim()
-  return v ? v : NO_MODULE
-}
 
 interface FilterOption {
   value: string
@@ -760,35 +726,10 @@ const projectOptions = computed<FilterOption[]>(() =>
   )
 )
 
-/** Sessions passing the project filter, and optionally the workflow filter. */
-function sessionsUpTo(level: 'project' | 'workflow'): AgentSession[] {
-  return sessions.value.filter(s => {
-    if (projectFilter.value !== null && projectKeyOf(s) !== projectFilter.value) return false
-    if (level === 'workflow' &&
-        workflowFilter.value !== null && workflowKeyOf(s) !== workflowFilter.value) return false
-    return true
-  })
+/** Sessions inside the selected project. */
+function sessionsOfProject(): AgentSession[] {
+  return sessions.value.filter(s => projectFilter.value === null || projectKeyOf(s) === projectFilter.value)
 }
-
-const workflowOptions = computed<FilterOption[]>(() =>
-  projectFilter.value === null
-    ? []
-    : groupOptions(
-        sessionsUpTo('project'),
-        workflowKeyOf,
-        v => (v === NO_WORKFLOW ? '(no workflow)' : `wf-${v.slice(0, 8)}`)
-      )
-)
-
-const moduleOptions = computed<FilterOption[]>(() =>
-  projectFilter.value === null
-    ? []
-    : groupOptions(
-        sessionsUpTo('workflow'),
-        moduleKeyOf,
-        v => (v === NO_MODULE ? '(unknown module)' : v)
-      )
-)
 
 const visibleSessions = computed<AgentSession[]>(() => {
   // Searching overrides the project gate: its purpose is precisely to
@@ -803,20 +744,14 @@ const visibleSessions = computed<AgentSession[]>(() => {
     return sessions.value.filter(s => runningRootIds.value.has(s.sessionId))
   }
   if (projectFilter.value === null) return []
-  return sessionsUpTo('workflow').filter(s =>
-    moduleFilter.value === null || moduleKeyOf(s) === moduleFilter.value)
+  return sessionsOfProject()
 })
 
 function onProjectFilterChange() {
-  workflowFilter.value = null
-  moduleFilter.value = null
   const first = visibleSessions.value[0]
   if (first) selectSession(first.sessionId)
 }
 
-function onWorkflowFilterChange() {
-  moduleFilter.value = null
-}
 
 function onSearchInput() {
   if (searchDebounce !== null) { clearTimeout(searchDebounce); searchDebounce = null }
@@ -1395,8 +1330,6 @@ async function onSessionCreated(data: AgentSession) {
   // Reveal the fresh session under the filter view: select its
   // project and clear the finer filters / any active search.
   projectFilter.value = projectKeyOf(data)
-  workflowFilter.value = null
-  moduleFilter.value = null
   searchQuery.value = ''
   searchMatchIds.value = null
   tokenUsage.value = null
