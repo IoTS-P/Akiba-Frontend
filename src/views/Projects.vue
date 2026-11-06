@@ -387,30 +387,60 @@
     </div>
 
     <div v-if="details.open" class="modal-overlay" @click.self="closeDetails">
-      <div class="modal details-modal">
+      <div class="modal-content details-modal">
         <div class="modal-header">
-          <h3>Project: {{ details.project }}</h3>
+          <div>
+            <h3>{{ details.project }}</h3>
+            <p class="details-sub">{{ details.folders }} folders · {{ details.files }} programs</p>
+          </div>
           <button class="modal-close" @click="closeDetails">×</button>
         </div>
+
         <div class="details-toolbar">
-          <input v-model="details.newFolder" class="details-input" placeholder="New folder name" />
-          <button class="btn-secondary" :disabled="!details.newFolder.trim()" @click="createFolder">
+          <input
+            v-model="details.newFolder"
+            class="details-input"
+            placeholder="New folder name"
+            @keyup.enter="createFolder"
+          />
+          <button class="btn-primary" :disabled="!details.newFolder.trim() || details.busy" @click="createFolder">
             New Folder
           </button>
           <button class="btn-secondary" :disabled="details.loading" @click="loadTree">Refresh</button>
         </div>
-        <div v-if="details.error" class="error">{{ details.error }}</div>
+
+        <div v-if="details.error" class="details-banner">{{ details.error }}</div>
+
         <ul class="tree">
-          <li v-for="e in details.entries" :key="e.path" :style="{ paddingLeft: 8 + depthOf(e) * 16 + 'px' }">
+          <li
+            v-for="e in details.entries"
+            :key="e.path"
+            class="tree-row"
+            :style="{ paddingLeft: 10 + depthOf(e) * 18 + 'px' }"
+          >
             <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
-            <span class="tree-name">{{ e.name }}</span>
+
+            <input
+              v-if="editingPath === e.path"
+              ref="renameInput"
+              v-model="editValue"
+              class="tree-edit"
+              @keyup.enter="commitRename(e)"
+              @keyup.esc="cancelRename"
+              @blur="commitRename(e)"
+            />
+            <span v-else class="tree-name" :title="e.path" @dblclick="startRename(e)">{{ e.name }}</span>
+
             <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
-            <span class="tree-actions">
-              <button class="link-btn" @click="renameEntry(e)">rename</button>
+            <span v-if="editingPath !== e.path" class="tree-actions">
+              <button class="link-btn" @click="startRename(e)">rename</button>
               <button class="link-btn danger" @click="deleteEntry(e)">delete</button>
             </span>
+            <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
           </li>
-          <li v-if="details.entries.length === 0" class="tree-empty">Empty project — no programs yet.</li>
+          <li v-if="details.entries.length === 0 && !details.loading" class="tree-empty">
+            {{ details.stale ? 'No index yet — the project is in use, refresh after the session ends.' : 'Empty project — no programs yet.' }}
+          </li>
         </ul>
       </div>
     </div>
@@ -418,7 +448,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { projectApi } from '@/services/api'
 import type { ExportTextStatus, ProjectSessionInfo } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
@@ -817,10 +847,21 @@ const details = reactive({
   open: false,
   project: '',
   entries: [] as TreeEntry[],
+  folders: 0,
+  files: 0,
   newFolder: '',
   loading: false,
+  busy: false,
+  stale: false,
   error: null as string | null,
 })
+
+// Renaming happens in place: the row turns into an input and the failure, if
+// any, is reported under that same row instead of in a notification bar.
+const editingPath = ref<string | null>(null)
+const editValue = ref('')
+const rowError = ref<{ path: string; message: string } | null>(null)
+const renameInput = ref<HTMLInputElement[] | null>(null)
 
 function depthOf(e: TreeEntry): number {
   return e.path.split('/').length - 1
@@ -852,6 +893,9 @@ async function loadTree() {
   try {
     const res = await projectApi.tree(details.project)
     details.entries = res.data.entries
+    details.stale = res.data.stale === true
+    details.folders = details.entries.filter(e => e.folder).length
+    details.files = details.entries.length - details.folders
   } catch (e: any) {
     details.error = e?.response?.data?.error || String(e)
   } finally {
@@ -862,24 +906,53 @@ async function loadTree() {
 async function createFolder() {
   const name = details.newFolder.trim()
   if (!name) return
+  details.busy = true
   try {
     await projectApi.createFolder(details.project, '', name)
     details.newFolder = ''
     await loadTree()
   } catch (e: any) {
     details.error = e?.response?.data?.error || String(e)
+  } finally {
+    details.busy = false
   }
 }
 
-async function renameEntry(e: TreeEntry) {
-  const to = prompt(`Rename '${e.name}' to:`, e.name)
-  if (!to || to === e.name) return
+function startRename(e: TreeEntry) {
+  detailError(null)
+  rowError.value = null
+  editingPath.value = e.path
+  editValue.value = e.name
+  nextTick(() => renameInput.value?.[0]?.focus())
+}
+
+function cancelRename() {
+  editingPath.value = null
+  editValue.value = ''
+}
+
+async function commitRename(e: TreeEntry) {
+  if (editingPath.value !== e.path) return
+  const to = editValue.value.trim()
+  if (!to || to === e.name) { cancelRename(); return }
+  details.busy = true
   try {
     await projectApi.renameEntry(details.project, e.path, to)
+    cancelRename()
+    rowError.value = null
     await loadTree()
   } catch (err: any) {
-    details.error = err?.response?.data?.error || String(err)
+    const message = err?.response?.data?.error || String(err)
+    rowError.value = { path: e.path, message }
+    // Stay in edit mode so the name can be fixed where it was typed.
+    nextTick(() => renameInput.value?.[0]?.focus())
+  } finally {
+    details.busy = false
   }
+}
+
+function detailError(message: string | null) {
+  details.error = message
 }
 
 async function deleteEntry(e: TreeEntry) {
@@ -1435,7 +1508,62 @@ select.text-input {
 }
 .project-row { cursor: pointer; }
 .project-row.row-selected { background: rgba(64, 132, 214, 0.16); }
-.details-modal { width: min(720px, 92vw); }
+.modal-content.details-modal {
+  width: min(760px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.details-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  opacity: 0.65;
+}
+.details-banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(217, 83, 79, 0.12);
+  border: 1px solid rgba(217, 83, 79, 0.35);
+  color: #d9534f;
+  font-size: 13px;
+}
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.04);
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.tree-row:hover { background: rgba(64, 132, 214, 0.10); }
+.tree-name { flex: 1; font-family: ui-monospace, monospace; font-size: 13px; cursor: text; }
+.tree-edit {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid #4084d6;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.tree-error {
+  flex-basis: 100%;
+  margin-left: 26px;
+  color: #d9534f;
+  font-size: 12px;
+}
 .details-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
 .details-input {
   flex: 1;

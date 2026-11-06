@@ -395,7 +395,7 @@ export const projectApi = {
   list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
   /** Folder tree of a project (Ghidra projects are folder trees, not flat lists). */
   tree: (projectName: string) =>
-    api.get<{ entries: { path: string; name: string; folder: boolean; size: number }[] }>(
+    api.get<{ entries: { path: string; name: string; folder: boolean; size: number }[]; stale: boolean }>(
       `/projects/${encodeURIComponent(projectName)}/tree`),
   createFolder: (projectName: string, parentPath: string, name: string) =>
     api.post<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/folders`, { path: parentPath, name }),
