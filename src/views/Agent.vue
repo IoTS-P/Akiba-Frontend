@@ -2204,6 +2204,9 @@ let lastStreamChunkAt = 0
 
 let streamPollTimer: number | null = null
 let streamPollSession = ''
+// Last `seq` applied to the bubble.  The server bus owns this counter and
+// never restarts it, so a generation change cannot hide chunks: the new
+// generation's first chunk is always > this cursor.
 let streamPollSince = 0
 let streamPollGeneration = -1 // -1 = not yet initialised
 let streamPollInFlight = false
@@ -2263,11 +2266,13 @@ async function pollStreamChunksOnce() {
     const { data } = await agentApi.getStreamChunks(streamPollSession, streamPollSince)
     const firstContact = streamPollGeneration === -1
     if (!firstContact && data.generation !== streamPollGeneration) {
-      // A new LLM generation started — discard the old text (and
-      // any interrupted marker) and re-pull from zero on the next
-      // tick.
+      // A new LLM generation started — discard the old text and any
+      // interrupted marker.  The cursor is intentionally NOT reset:
+      // the backend's seq never restarts, so everything this response
+      // carries belongs to the new generation and is applied below.
+      // (Resetting to 0 and returning here was the bug that dropped the
+      // new generation's early chunks for one whole poll interval.)
       streamPollGeneration = data.generation
-      streamPollSince = 0
       targetText = ''
       streamingText.value = ''
       streamingHtml.value = ''
@@ -2277,7 +2282,6 @@ async function pollStreamChunksOnce() {
       streamInterruptedError.value = null
       streamStalled.value = false
       lastStreamChunkAt = Date.now()
-      return
     }
     streamPollGeneration = data.generation
     if (firstContact && data.done && !data.error) {
@@ -2290,13 +2294,20 @@ async function pollStreamChunksOnce() {
       // partial content exists ONLY in the stream history, so we
       // render it and mark the bubble interrupted.)
       streamFinishedGeneration = data.generation
-      streamPollSince = data.latestCount
+      streamPollSince = data.latestSeq ?? data.latestCount ?? streamPollSince
       refreshMessages()
       return
     }
     let gotNewChunks = false
     for (const chunk of data.chunks ?? []) {
-      if (chunk.chunkCount > streamPollSince) streamPollSince = chunk.chunkCount
+      // Cursor follows the server-assigned seq, not the per-generation
+      // chunkCount, so a chunk that only marks the end of a generation
+      // still advances it.
+      if (typeof chunk.seq === 'number') {
+        if (chunk.seq > streamPollSince) streamPollSince = chunk.seq
+      } else if (chunk.chunkCount > streamPollSince) {
+        streamPollSince = chunk.chunkCount
+      }
       if (chunk.delta) {
         appendToTypewriter(chunk.delta)
         gotNewChunks = true

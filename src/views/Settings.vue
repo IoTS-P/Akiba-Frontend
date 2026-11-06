@@ -63,7 +63,7 @@
             <div class="key-row">
               <input
                 v-model="form.apiKey"
-                placeholder="sk-…"
+                :placeholder="selectedConfigIndex >= 0 ? 'Leave blank to keep the stored key' : 'sk-…'"
                 :type="showKey ? 'text' : 'password'"
                 autocomplete="off"
                 :disabled="saving"
@@ -84,13 +84,34 @@
           </div>
 
           <div v-if="availableModels.length" class="form-group">
-            <label>Models to save</label>
+            <label>
+              Models to save
+              <span class="hint">context length is the model's window in tokens</span>
+            </label>
+            <p class="model-ctx-note">
+              Leave a context length blank to keep the built-in table value shown next to the model.
+              Set it when a provider renames a model and the table's guess is too small.
+            </p>
             <div class="model-checkbox-list">
-              <label v-for="m in availableModels" :key="m" class="model-checkbox-item">
-                <input type="checkbox" :value="m" v-model="selectedModelNames" />
-                {{ m }}
-              </label>
+              <div v-for="m in availableModels" :key="m" class="model-checkbox-item">
+                <label class="model-check-line">
+                  <input type="checkbox" :value="m" v-model="selectedModelNames" />
+                  <span class="model-name">{{ m }}</span>
+                </label>
+                <input
+                  class="ctx-input"
+                  type="number"
+                  min="1"
+                  :max="MAX_CONTEXT_TOKENS"
+                  placeholder="auto"
+                  :disabled="saving || !selectedModelNames.includes(m)"
+                  v-model="contextLengths[m]"
+                  @input="contextError = ''"
+                />
+                <span class="ctx-hint" :class="{ invalid: isContextInvalid(m) }">{{ contextHint(m) }}</span>
+              </div>
             </div>
+            <div v-if="contextError" class="error">{{ contextError }}</div>
           </div>
 
           <div v-if="error" class="error">{{ error }}</div>
@@ -475,7 +496,7 @@
 import { reactive, ref, computed, onMounted, watch } from 'vue'
 import { llmConfigApi, runtimeConfigApi, projectApi, updateApi, moduleApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry, ModuleEntry } from '@/services/api'
+import type { LLMProviderInfo, StoredKeyEntry, RuntimeConfigEntry, ModuleEntry, ModelContextLengthInfo } from '@/services/api'
 
 const authStore = useAuthStore()
 
@@ -547,6 +568,24 @@ const availableModels = ref<string[]>([])
 const selectedModelNames = ref<string[]>([])
 const selectedConfigIndex = ref(-1) // -1 means "new config"
 
+/** Upper bound the framework accepts for a per-model context length. */
+const MAX_CONTEXT_TOKENS = 2_000_000
+
+/** Raw input text per model; '' means "use the built-in table". */
+const contextLengths = ref<Record<string, string>>({})
+/** What the backend resolves per model, so a blank field can show its fallback. */
+const effectiveWindows = ref<Record<string, ModelContextLengthInfo>>({})
+const contextError = ref('')
+
+/** True while a saved configuration is selected, i.e. its key is already on disk. */
+const editingStoredConfig = computed(() => selectedConfigIndex.value >= 0)
+
+const SOURCE_LABELS: Record<string, string> = {
+  configured: 'custom',
+  table: 'built-in table',
+  default: '128K fallback'
+}
+
 const form = reactive({
   provider: '',
   apiKey: '',
@@ -580,6 +619,86 @@ function populateFormFromKey(key: StoredKeyEntry) {
   form.apiKey = '' // API key is not returned for security
   selectedModelNames.value = key.modelNames.filter(Boolean)
   availableModels.value = key.modelNames.filter(Boolean)
+  resetContextLengths(availableModels.value, key.contextLengths || {})
+}
+
+/** Rebuild one input per model, seeding saved overrides and refreshing the hints. */
+function resetContextLengths(models: string[], saved: Record<string, number> = {}) {
+  const next: Record<string, string> = {}
+  for (const model of models) {
+    const value = saved[model]
+    next[model] = value === undefined ? '' : String(value)
+  }
+  contextLengths.value = next
+  contextError.value = ''
+  void loadEffectiveWindows(models)
+}
+
+/** Ask the backend what applies right now; a failure only blanks the hint. */
+async function loadEffectiveWindows(models: string[]) {
+  const wanted = models.filter(Boolean)
+  if (wanted.length === 0) {
+    effectiveWindows.value = {}
+    return
+  }
+  try {
+    const { data } = await llmConfigApi.contextLengths(wanted)
+    effectiveWindows.value = data.contextLengths || {}
+  } catch {
+    effectiveWindows.value = {}
+  }
+}
+
+/** Parsed input: null for blank, NaN for junk. */
+function parseContextLength(model: string): number | null {
+  const text = (contextLengths.value[model] || '').trim()
+  if (text === '') return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : NaN
+}
+
+function isContextInvalid(model: string): boolean {
+  const value = parseContextLength(model)
+  if (value === null) return false
+  return !Number.isInteger(value) || value <= 0 || value > MAX_CONTEXT_TOKENS
+}
+
+/** One-line explanation of the effective window and what the table would give. */
+function contextHint(model: string): string {
+  const info = effectiveWindows.value[model]
+  const builtIn = info
+    ? `${info.tableLength.toLocaleString('en-US')} tokens in the built-in table`
+    : 'the 128K fallback'
+  const typed = parseContextLength(model)
+  if (typed === null) {
+    if (!info) return `effective: ${builtIn}`
+    const source = SOURCE_LABELS[info.source] || info.source
+    return `effective now: ${info.contextLength.toLocaleString('en-US')} tokens (${source})`
+  }
+  if (isContextInvalid(model)) {
+    return `must be a whole number from 1 to ${MAX_CONTEXT_TOKENS.toLocaleString('en-US')} tokens`
+  }
+  return `${typed.toLocaleString('en-US')} tokens · otherwise ${builtIn}`
+}
+
+/**
+ * Payload map for the selected models; null when an input is out of range.
+ *
+ * Omitted models keep no override, which is how clearing a field resets it.
+ */
+function collectContextLengths(): Record<string, number> | null {
+  const collected: Record<string, number> = {}
+  for (const model of selectedModelNames.value) {
+    const value = parseContextLength(model)
+    if (value === null) continue
+    if (isContextInvalid(model)) {
+      contextError.value = `Context length for "${model}" must be a whole number ` +
+        `from 1 to ${MAX_CONTEXT_TOKENS.toLocaleString('en-US')} tokens.`
+      return null
+    }
+    collected[model] = value
+  }
+  return collected
 }
 
 function onConfigSelected() {
@@ -595,6 +714,7 @@ function onConfigSelected() {
     form.apiKey = ''
     availableModels.value = []
     selectedModelNames.value = []
+    resetContextLengths([])
     error.value = ''
     message.value = ''
   }
@@ -621,6 +741,7 @@ async function deleteSelectedConfig() {
       form.apiKey = ''
       availableModels.value = []
       selectedModelNames.value = []
+      resetContextLengths([])
     } else {
       selectedConfigIndex.value = 0
       populateFormFromKey(keys.value[0])
@@ -654,6 +775,16 @@ async function fetchModelList() {
     availableModels.value = data.models || []
     // Auto-select all fetched models
     selectedModelNames.value = [...availableModels.value]
+    // Carry over saved overrides and anything already typed for these models.
+    const saved = keys.value.find(
+      k => k.provider === form.provider && (k.baseUrl || '') === (form.baseUrl || '')
+    )?.contextLengths || {}
+    const carried: Record<string, number> = { ...saved }
+    for (const model of availableModels.value) {
+      const typed = parseContextLength(model)
+      if (typed !== null && !isContextInvalid(model)) carried[model] = typed
+    }
+    resetContextLengths(availableModels.value, carried)
     if (availableModels.value.length === 0) {
       message.value = 'No models returned by the provider.'
     }
@@ -667,10 +798,19 @@ async function fetchModelList() {
 async function save() {
   error.value = ''
   message.value = ''
-  if (!form.provider || selectedModelNames.value.length === 0 || !form.apiKey.trim()) {
-    error.value = 'Provider, at least one model, and API key are required.'
+  contextError.value = ''
+  if (!form.provider || selectedModelNames.value.length === 0) {
+    error.value = 'Provider and at least one model are required.'
     return
   }
+  // A stored key never leaves the server, so an existing configuration is
+  // editable without re-entering it; a new one still needs a key.
+  if (!editingStoredConfig.value && !form.apiKey.trim()) {
+    error.value = 'API key is required for a new configuration.'
+    return
+  }
+  const lengths = collectContextLengths()
+  if (lengths === null) return
 
   saving.value = true
   try {
@@ -678,6 +818,7 @@ async function save() {
       provider: form.provider,
       modelNames: selectedModelNames.value.map(s => s.trim()).filter(Boolean),
       baseUrl: form.baseUrl?.trim() || undefined,
+      contextLengths: lengths,
       apiKey: form.apiKey.trim()
     })
     // Reload keys and auto-select the new/updated entry
@@ -688,6 +829,8 @@ async function save() {
       (k) => k.provider === form.provider && selectedModelNames.value.some(m => k.modelNames.includes(m))
     )
     selectedConfigIndex.value = idx >= 0 ? idx : 0
+    // Reflect what the server actually stored (key blanked, overrides resolved).
+    if (keys.value.length > 0) populateFormFromKey(keys.value[selectedConfigIndex.value])
     message.value = 'Configuration saved.'
   } catch (e: any) {
     error.value = e?.response?.data?.error || e?.message || 'Failed to save configuration'
@@ -1553,8 +1696,41 @@ function handleTabKey(e: KeyboardEvent) {
   padding: 6px 12px;
   font-size: 13px;
   font-family: 'Courier New', monospace;
-  cursor: pointer;
   transition: background 0.15s;
+}
+.model-check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-input {
+  width: 120px;
+  flex: none;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.ctx-hint {
+  width: 300px;
+  flex: none;
+  color: #888;
+  font-family: inherit;
+  font-size: 11px;
+}
+.ctx-hint.invalid {
+  color: #c0392b;
+}
+.model-ctx-note {
+  margin: 0 0 8px;
+  color: #777;
+  font-size: 12px;
 }
 .model-checkbox-item:hover {
   background: #f0f0f0;

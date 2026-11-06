@@ -227,20 +227,22 @@ export const agentApi = {
   retryNow: (sessionId: string) =>
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/retry-now`),
   /**
-   * Incremental poll for live LLM streaming chunks.  `since` is the
-   * highest chunkCount already consumed; the backend returns only
-   * newer chunks plus a `generation` counter that bumps whenever a
-   * new LLM generation starts (the caller must reset its accumulated
-   * text and re-pull from zero on change).
+   * Incremental poll for live LLM streaming chunks.  `since` is the last
+   * `seq` already applied; the backend returns only chunks with a greater
+   * seq.  `generation` bumps whenever a new LLM generation starts (the
+   * caller discards its accumulated text then, but keeps its seq cursor —
+   * the counter never restarts).
    */
   getStreamChunks: (sessionId: string, since: number) =>
     api.get<{
       active: boolean
       generation: number
+      latestSeq: number
       latestCount: number
       done: boolean
       error?: string | null
       chunks: Array<{
+        seq: number
         delta: string
         chunkCount: number
         byteCount: number
@@ -506,13 +508,25 @@ export interface StoredKeyEntry {
   provider: string
   modelNames: string[]
   baseUrl: string | null
+  /** Explicit context window per model, in tokens; missing = built-in table. */
+  contextLengths?: Record<string, number>
+}
+
+/** Effective window for a model: what applies, why, and the built-in value. */
+export interface ModelContextLengthInfo {
+  contextLength: number
+  source: 'configured' | 'table' | 'default'
+  tableLength: number
 }
 
 export interface LLMConfigPayload {
   provider: string
   modelNames: string[]
+  /** Blank keeps the stored key of an existing (provider, baseUrl) entry. */
   apiKey: string
   baseUrl?: string
+  /** Authoritative for the models listed: omit a model to fall back to the table. */
+  contextLengths?: Record<string, number>
 }
 
 export const llmConfigApi = {
@@ -523,6 +537,10 @@ export const llmConfigApi = {
     api.post<{ message: string }>('/llm/keys', payload),
   deleteKey: (provider: string, modelName: string) =>
     api.delete<{ message: string }>('/llm/keys', { params: { provider, modelName } }),
+  contextLengths: (modelNames: string[]) =>
+    api.get<{ contextLengths: Record<string, ModelContextLengthInfo> }>('/llm/context-lengths', {
+      params: { modelNames: modelNames.join(',') }
+    }),
   fetchModels: (provider: string, apiKey: string, baseUrl?: string) =>
     api.get<{ models: string[] }>('/llm/models', { params: { provider, baseUrl, apiKey } })
 }
