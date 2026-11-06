@@ -20,6 +20,10 @@
           :class="['tab-btn', { active: mode === 'project' }]"
           @click="mode = 'project'"
         >Use Existing Project</button>
+        <button
+          :class="['tab-btn', { active: mode === 'new-project' }]"
+          @click="mode = 'new-project'"
+        >New Project</button>
       </div>
 
       <!-- Tab 1: Binary search -->
@@ -118,6 +122,25 @@
         </div>
       </div>
 
+      <!-- Tab 3: start with an empty project, no binary attached yet -->
+      <div v-if="mode === 'new-project'">
+        <div class="form-group">
+          <label>Project name</label>
+          <input
+            v-model="newProjectName"
+            class="search-input"
+            placeholder="Project name"
+          />
+          <div class="muted small project-hint">
+            The conversation starts bound to this project. Programs can be
+            imported or copied into it afterwards; the agent gets a workspace
+            directory of its own and the project stays locked to this session
+            while it runs.
+          </div>
+          <div v-if="newProjectNameError" class="error project-error">{{ newProjectNameError }}</div>
+        </div>
+      </div>
+
       <div class="modal-actions">
         <button @click="close" class="btn-secondary">Cancel</button>
         <button @click="createSession" class="btn-primary" :disabled="!canCreate">
@@ -148,7 +171,8 @@ const emit = defineEmits<{
   created: [session: AgentSession]
 }>()
 
-const mode = ref<'binary' | 'project'>('binary')
+const mode = ref<'binary' | 'project' | 'new-project'>('binary')
+const newProjectName = ref('')
 const fileSearchQuery = ref('')
 const searchResults = ref<FileSearchResult[]>([])
 const searching = ref(false)
@@ -175,13 +199,28 @@ const projectNameError = computed(() => {
   return ''
 })
 
+const newProjectNameError = computed(() => {
+  if (mode.value !== 'new-project') return ''
+  const name = newProjectName.value.trim()
+  if (!name) return 'Project name is required.'
+  if (!validProjectName.test(name) || name.includes('..')) {
+    return 'Use 1-64 chars: letters, digits, dot, underscore or hyphen.'
+  }
+  if (ghidraProjects.value.includes(name)) return 'That project already exists.'
+  return ''
+})
+
 const canCreate = computed(() => {
   if (props.creating) return false
   if (mode.value === 'binary') return true
+  if (mode.value === 'new-project') return !newProjectNameError.value
   return !!selectedExistingProject.value && !!selectedProgram.value
 })
 
 const createButtonLabel = computed(() => {
+  if (mode.value === 'new-project') {
+    return newProjectName.value.trim() ? `Create "${newProjectName.value.trim()}"` : 'Create project'
+  }
   if (mode.value === 'binary') {
     return selectedFile.value ? `Analyze "${selectedFile.value.name}"` : 'Start Empty'
   }
@@ -213,6 +252,7 @@ watch(
     selectedFile.value = null
     projectMode.value = 'new'
     selectedProjectName.value = defaultProjectName()
+    newProjectName.value = defaultProjectName()
     mode.value = 'binary'
     selectedExistingProject.value = ''
     programList.value = []
@@ -292,6 +332,11 @@ async function createSession() {
       modalError.value = projectNameError.value
       return
     }
+  } else if (mode.value === 'new-project') {
+    if (newProjectNameError.value) {
+      modalError.value = newProjectNameError.value
+      return
+    }
   } else if (!selectedExistingProject.value || !selectedProgram.value) {
     return
   }
@@ -304,6 +349,11 @@ async function createSession() {
       payload.sessionName = `Analysis of ${selectedFile.value.name}`
       payload.projectName = selectedProjectName.value.trim()
       payload.projectMode = projectMode.value
+    } else if (mode.value === 'new-project') {
+      const name = newProjectName.value.trim()
+      payload.projectName = name
+      payload.projectMode = 'new'
+      payload.sessionName = `Project ${name}`
     } else if (mode.value === 'project') {
       payload.projectName = selectedExistingProject.value
       payload.projectMode = 'existing'
