@@ -1696,7 +1696,7 @@ function handleTabKey(e: KeyboardEvent) {
   padding: 8px 10px;
   background: #fafafa;
 }
-@media (max-width: 1180px) {
+@media (max-width: 980px) {
   .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
@@ -1707,6 +1707,7 @@ function handleTabKey(e: KeyboardEvent) {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
   padding: 4px 6px;
   border-radius: 4px;
   font-size: 13px;
@@ -1727,19 +1728,22 @@ function handleTabKey(e: KeyboardEvent) {
   cursor: pointer;
 }
 .model-name {
+  padding-right: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ctx-input {
+/* `.form-group input` sets width:100%, so this needs the extra class to win. */
+.model-cell .ctx-input {
   width: 76px;
-  flex: 0 0 auto;
-  padding: 2px 6px;
+  max-width: 76px;
+  flex: 0 0 76px;
+  padding: 3px 6px;
   font-size: 12px;
   text-align: right;
   box-sizing: border-box;
 }
-.ctx-input.invalid {
+.model-cell .ctx-input.invalid {
   border-color: #c0392b;
   color: #c0392b;
 }
