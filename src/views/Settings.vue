@@ -92,23 +92,24 @@
               Leave a context length blank to keep the built-in table value shown next to the model.
               Set it when a provider renames a model and the table's guess is too small.
             </p>
-            <div class="model-checkbox-list">
-              <div v-for="m in availableModels" :key="m" class="model-checkbox-item">
+            <div class="model-grid">
+              <div v-for="m in availableModels" :key="m" class="model-cell">
                 <label class="model-check-line">
                   <input type="checkbox" :value="m" v-model="selectedModelNames" />
-                  <span class="model-name">{{ m }}</span>
+                  <span class="model-name" :title="m">{{ m }}</span>
                 </label>
                 <input
                   class="ctx-input"
-                  type="number"
-                  min="1"
-                  :max="MAX_CONTEXT_TOKENS"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="9"
                   placeholder="auto"
+                  :class="{ invalid: isContextInvalid(m) }"
                   :disabled="saving || !selectedModelNames.includes(m)"
+                  :title="contextHint(m)"
                   v-model="contextLengths[m]"
                   @input="contextError = ''"
                 />
-                <span class="ctx-hint" :class="{ invalid: isContextInvalid(m) }">{{ contextHint(m) }}</span>
               </div>
             </div>
             <div v-if="contextError" class="error">{{ contextError }}</div>
@@ -666,14 +667,17 @@ function isContextInvalid(model: string): boolean {
 /** One-line explanation of the effective window and what the table would give. */
 function contextHint(model: string): string {
   const info = effectiveWindows.value[model]
-  const builtIn = info
+  // The hint is rendered as a tooltip during typing, so it must be total: a
+  // partial response from the backend used to throw here and blank the page.
+  const builtIn = info && typeof info.tableLength === 'number'
     ? `${info.tableLength.toLocaleString('en-US')} tokens in the built-in table`
     : 'the 128K fallback'
   const typed = parseContextLength(model)
   if (typed === null) {
     if (!info) return `effective: ${builtIn}`
     const source = SOURCE_LABELS[info.source] || info.source
-    return `effective now: ${info.contextLength.toLocaleString('en-US')} tokens (${source})`
+    const window = typeof info.contextLength === 'number' ? info.contextLength : 0
+    return `effective now: ${window.toLocaleString('en-US')} tokens (${source})`
   }
   if (isContextInvalid(model)) {
     return `must be a whole number from 1 to ${MAX_CONTEXT_TOKENS.toLocaleString('en-US')} tokens`
@@ -1681,28 +1685,44 @@ function handleTabKey(e: KeyboardEvent) {
   flex: 1;
 }
 
-.model-checkbox-list {
-  max-height: 240px;
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px 16px;
+  max-height: 260px;
   overflow-y: auto;
   border: 1px solid #eee;
   border-radius: 6px;
-  padding: 6px 0;
+  padding: 8px 10px;
   background: #fafafa;
 }
-.model-checkbox-item {
+@media (max-width: 1180px) {
+  .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .model-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.model-cell {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
   font-size: 13px;
   font-family: 'Courier New', monospace;
-  transition: background 0.15s;
+}
+.model-cell:hover { background: #f0f0f0; }
+.model-cell input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  margin: 0;
 }
 .model-check-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 1;
+  gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
   cursor: pointer;
 }
@@ -1712,32 +1732,21 @@ function handleTabKey(e: KeyboardEvent) {
   white-space: nowrap;
 }
 .ctx-input {
-  width: 120px;
-  flex: none;
-  padding: 3px 6px;
+  width: 76px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
   font-size: 12px;
+  text-align: right;
+  box-sizing: border-box;
 }
-.ctx-hint {
-  width: 300px;
-  flex: none;
-  color: #888;
-  font-family: inherit;
-  font-size: 11px;
-}
-.ctx-hint.invalid {
+.ctx-input.invalid {
+  border-color: #c0392b;
   color: #c0392b;
 }
 .model-ctx-note {
   margin: 0 0 8px;
   color: #777;
   font-size: 12px;
-}
-.model-checkbox-item:hover {
-  background: #f0f0f0;
-}
-.model-checkbox-item input[type="checkbox"] {
-  width: auto;
-  margin: 0;
 }
 
 .model-row {
