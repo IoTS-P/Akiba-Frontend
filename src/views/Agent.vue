@@ -1428,7 +1428,10 @@ async function refreshMessages() {
     totalTokens.value = roundInputTokens.value + roundOutputTokens.value
     lastInputTokens.value = data.lastInputTokens ?? null
     contextLength.value = data.contextLength ?? null
-    if (messagesChanged) await scrollToBottom()
+    if (messagesChanged) {
+      await scrollToBottom()
+      settleStreamIfPersisted(nextMessages)
+    }
     recordPollSuccess()
   } catch (e) {
     recordPollFailure(e)
@@ -2406,6 +2409,32 @@ function finishStreaming(error?: string | null) {
       streamThinkingActive.value = false
     }
   }, 300)
+}
+
+/**
+ * Retire the live bubble once the transcript already holds the answer.
+ *
+ * A fast provider finishes the text long before the typewriter has drained its
+ * buffer, so the completed message appeared above while the same words were
+ * still being typed below. The stored row is the authority: as soon as it
+ * covers what is on screen, the bubble has nothing left to say.
+ */
+function settleStreamIfPersisted(rows: Array<{ role: string; content?: string | null }>) {
+  if (!streamingActive.value || !streamPollSession) return
+  const last = rows[rows.length - 1]
+  if (!last || last.role !== 'assistant') return
+  const stored = (last.content ?? '').trim()
+  const typed = (targetText || streamingText.value).trim()
+  // A mid-turn tool-call row is shorter than the answer still being streamed;
+  // clearing on it would swallow the rest of the generation.
+  if (stored && typed && !typed.startsWith(stored)) return
+  targetText = ''
+  streamingChunkCount.value = 0
+  stopTypewriter()
+  streamingText.value = ''
+  streamingHtml.value = ''
+  streamingThinkHtml.value = ''
+  streamThinkingActive.value = false
 }
 
 // ---- typewriter animation ----------------------------------------
