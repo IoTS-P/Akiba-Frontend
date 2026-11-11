@@ -2214,6 +2214,8 @@ function applyToolEvent(kind: string, payload: string) {
 }
 
 interface InterruptionNotice {
+  /** Conversation the note belongs to; notes survive switching sessions. */
+  sessionId: string
   afterId: number | null
   text: string
 }
@@ -2224,18 +2226,24 @@ const interruptionNotices = ref<InterruptionNotice[]>([])
 /** Notices whose anchor message is gone, or that arrived with no transcript. */
 const danglingNotices = computed(() => {
   const ids = new Set(visibleMessages.value.map(m => m.messageId))
-  return interruptionNotices.value.filter(n => n.afterId === null || !ids.has(n.afterId))
+  return interruptionNotices.value.filter(
+    n => n.sessionId === activeSessionId.value && (n.afterId === null || !ids.has(n.afterId)),
+  )
 })
 
 function noticeAfter(messageId: number): string | null {
-  return interruptionNotices.value.find(n => n.afterId === messageId)?.text ?? null
+  return interruptionNotices.value.find(
+    n => n.sessionId === activeSessionId.value && n.afterId === messageId,
+  )?.text ?? null
 }
 
 function markInterruption(text: string) {
+  const sessionId = activeSessionId.value
+  if (!sessionId) return
   const last = visibleMessages.value[visibleMessages.value.length - 1]
   interruptionNotices.value = [
     ...interruptionNotices.value,
-    { afterId: last?.messageId ?? null, text },
+    { sessionId, afterId: last?.messageId ?? null, text },
   ]
 }
 
@@ -2405,9 +2413,10 @@ function startStreamPolling(sessionId: string) {
   // Live state belongs to the session on screen: drop whatever the previous
   // session left behind before this one starts reporting.
   if (streamPollSession !== sessionId) {
+    // Live tools belong to the turn on screen; notices are kept, they are part
+    // of that conversation's record.
     liveTools.value = []
     stopClock()
-    interruptionNotices.value = []
   }
   // Always stop the previous poller — switching sessions must not
   // leak chunks from the old session into the new one's bubble.
