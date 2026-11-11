@@ -2129,18 +2129,13 @@ async function sendMessage() {
       if (tempUser) {
         messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
       }
-      if (sessionForSend) pendingOptimistic.delete(sessionForSend)
-      const status = e?.response?.status
+      // The message stays on screen: whatever failed, the turn it belonged to
+      // is part of the transcript.  Dropping it made the send look like it
+      // never happened, and restoring the draft invited a duplicate.
       const detail = e?.response?.data?.error
-      if (status === 409) {
-        // The project is held by another conversation.  The banner alone was
-        // easy to miss, so state it in the transcript where the turn died.
-        markInterruption(
-          detail || 'This project is in use by another conversation. Stop it there, then send again.',
-        )
-      }
-      errorMsg.value = detail || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
-      if (status !== 409) input.value = content
+      const reason = detail || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
+      markInterruption(reason)
+      errorMsg.value = reason
     }
   } finally {
     if (sendingSessionId.value === sessionForSend) sendingSessionId.value = null
