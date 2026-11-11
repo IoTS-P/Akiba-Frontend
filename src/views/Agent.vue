@@ -493,12 +493,12 @@
               ></textarea>
               <button
                 class="btn-primary composer-submit"
-                :type="sending ? 'button' : 'submit'"
-                :disabled="!sending && !input.trim()"
-                :class="{ stopping: sending }"
-                @click="sending ? onComposerStop() : undefined"
+                :type="turnRunning ? 'button' : 'submit'"
+                :disabled="!turnRunning && !input.trim()"
+                :class="{ stopping: turnRunning }"
+                @click="turnRunning ? onComposerStop() : undefined"
               >
-                <template v-if="sending">
+                <template v-if="turnRunning">
                   {{ input.trim() ? 'Stop and send' : 'Stop' }}
                 </template>
                 <template v-else>{{ isManagedSession ? 'Inject' : 'Send' }}</template>
@@ -792,6 +792,24 @@ const loadingMessages = ref(false)
 const showNewModal = ref(false)
 const creatingSession = ref(false)
 const sending = ref(false)
+
+/** The row of the session in view, kept fresh by the session-status poller. */
+const activeSessionRow = computed(() =>
+  sessions.value.find(s => s.sessionId === activeSessionId.value) ?? null
+)
+
+/**
+ * Whether a turn is running, whoever started it.
+ *
+ * `sending` only knows about turns this tab launched: a turn left running by a
+ * server restart (or by another tab) is invisible to it, which used to leave a
+ * disabled Send button and no way to stop. The session row is the authority.
+ */
+const turnRunning = computed(() =>
+  sending.value ||
+  activeSessionRow.value?.runtimeState === 'running' ||
+  activeSessionRow.value?.status === 'running'
+)
 const exportingTree = ref(false)
 const errorMsg = ref('')
 const input = ref('')
@@ -2086,7 +2104,7 @@ async function sendMessage() {
  * sends what was typed, so a follow-up does not need a second click.
  */
 async function onComposerStop() {
-  if (!sending.value) return
+  if (!turnRunning.value) return
   const pending = input.value
   await cancelChat()
   await waitUntilIdle()
@@ -2102,9 +2120,12 @@ async function waitUntilIdle(timeoutMs = 15000) {
 }
 
 async function cancelChat() {
-  if (!activeSessionId.value || !sending.value) return
+  if (!activeSessionId.value || !turnRunning.value) return
   try {
     await agentApi.cancelChat(activeSessionId.value)
+    // Pull the new state immediately: the button has to leave "stop" as soon as
+    // the backend confirms the turn is over, not on the next status tick.
+    void loadSessions()
     errorMsg.value = ''
   } catch {
     // The process may have already finished; ignore errors.
@@ -2117,7 +2138,7 @@ function onComposerKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault()
     // While a turn runs the shortcut means "stop and send", matching the button.
-    if (sending.value) {
+    if (turnRunning.value) {
       if (input.value.trim()) void onComposerStop()
       return
     }
