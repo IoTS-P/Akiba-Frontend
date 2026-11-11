@@ -490,17 +490,19 @@
                   : 'Type your message and press Ctrl/⌘ + Enter to send…'"
                 rows="3"
                 @keydown="onComposerKeydown"
-                :disabled="sending"
               ></textarea>
-              <button class="btn-primary" type="submit" :disabled="sending || !input.trim()">
-                {{ sending ? 'Sending…' : (isManagedSession ? 'Inject' : 'Send') }}
-              </button>
               <button
-                v-if="sending && !isManagedSession"
-                class="btn-secondary cancel-chat-btn"
-                type="button"
-                @click="cancelChat"
-              >Cancel</button>
+                class="btn-primary composer-submit"
+                :type="sending ? 'button' : 'submit'"
+                :disabled="!sending && !input.trim()"
+                :class="{ stopping: sending }"
+                @click="sending ? onComposerStop() : undefined"
+              >
+                <template v-if="sending">
+                  {{ input.trim() ? 'Stop and send' : 'Stop' }}
+                </template>
+                <template v-else>{{ isManagedSession ? 'Inject' : 'Send' }}</template>
+              </button>
             </div>
           </form>
         </div>
@@ -2077,6 +2079,28 @@ async function sendMessage() {
   }
 }
 
+/**
+ * The submit button doubles as the stop control while a turn runs.
+ *
+ * An empty composer stops the turn; a composer holding text stops it and then
+ * sends what was typed, so a follow-up does not need a second click.
+ */
+async function onComposerStop() {
+  if (!sending.value) return
+  const pending = input.value
+  await cancelChat()
+  await waitUntilIdle()
+  if (pending.trim()) await sendMessage()
+}
+
+/** Wait for the aborted turn to settle before reusing the composer. */
+async function waitUntilIdle(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs
+  while (sending.value && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+}
+
 async function cancelChat() {
   if (!activeSessionId.value || !sending.value) return
   try {
@@ -2092,7 +2116,12 @@ async function cancelChat() {
 function onComposerKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault()
-    sendMessage()
+    // While a turn runs the shortcut means "stop and send", matching the button.
+    if (sending.value) {
+      if (input.value.trim()) void onComposerStop()
+      return
+    }
+    void sendMessage()
   }
 }
 
@@ -4230,6 +4259,16 @@ watch(
 }
 
 /* LLM selector + composer */
+/* Wide enough for the longest label so stopping never shifts the composer. */
+.composer-submit {
+  min-width: 10rem;
+  justify-content: center;
+  white-space: nowrap;
+}
+.composer-submit.stopping {
+  background: #c0392b;
+  border-color: #c0392b;
+}
 .composer-area {
   border-top: 1px solid #eee;
 }
