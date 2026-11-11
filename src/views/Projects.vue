@@ -52,7 +52,14 @@
           :class="{ 'row-selected': selected.has(project.name) }"
           @click="toggleRow(project.name, $event)"
         >
-          <td class="project-name">{{ project.name }}</td>
+          <td class="project-name">
+            {{ project.name }}
+            <span
+              v-if="project.locked"
+              class="lock-badge"
+              :title="lockTitle(project.locked)"
+            >in use</span>
+          </td>
           <td>{{ project.sessionCount }}</td>
           <td>{{ project.fileCount }}</td>
         </tr>
@@ -186,7 +193,7 @@
             placeholder="New folder name"
             @keyup.enter="createFolder"
           />
-          <button class="btn-primary" :disabled="!details.newFolder.trim() || details.busy" @click="createFolder">
+          <button class="btn-primary" :disabled="!details.newFolder.trim() || details.busy || !!detailsLock" @click="createFolder">
             New Folder
           </button>
           <button class="btn-secondary" :disabled="details.loading" @click="loadTree">Refresh</button>
@@ -216,6 +223,10 @@
         </div>
 
         <div v-if="details.error" class="details-banner">{{ details.error }}</div>
+        <div v-if="detailsLock" class="details-banner lock">
+          In use by session {{ detailsLock.sessionId || '?' }} — editing is disabled
+          until that conversation ends.
+        </div>
 
         <ul class="tree">
           <li
@@ -256,7 +267,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { projectApi, fileApi } from '@/services/api'
 import type { FileEntry } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
@@ -455,6 +466,11 @@ async function exportWorkspaceSelected() {
 async function deleteSelected() {
   const names = [...selected.value]
   if (names.length === 0) return
+  const held = names.filter(n => projects.value.find(p => p.name === n)?.locked)
+  if (held.length > 0) {
+    error.value = `Cannot delete while in use: ${held.join(', ')}`
+    return
+  }
   if (names.length === 1) { openDeleteModal(names[0]); return }
   if (!confirm(`Delete ${names.length} projects? This cannot be undone.`)) return
   deleting.value = names[0]
@@ -483,6 +499,18 @@ const details = reactive({
   stale: false,
   error: null as string | null,
 })
+
+/** Lock holder of the project open in the details dialog, if any. */
+const detailsLock = computed(() =>
+  projects.value.find(p => p.name === details.project)?.locked ?? null
+)
+
+/** Tooltip for the "in use" badge in the list. */
+function lockTitle(holder: { sessionId?: string | null; pid?: number; acquiredAt?: string | null }) {
+  const session = holder.sessionId ? `session ${holder.sessionId}` : 'a session'
+  const since = holder.acquiredAt ? ` since ${holder.acquiredAt}` : ''
+  return `held by ${session}${since} (pid ${holder.pid ?? '?'})`
+}
 
 // Renaming happens in place: the row turns into an input and the failure, if
 // any, is reported under that same row instead of in a notification bar.
@@ -968,6 +996,22 @@ async function deleteEntry(e: TreeEntry) {
   margin-left: auto;
   font-size: 12px;
   opacity: 0.65;
+}
+.lock-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: rgba(217, 83, 79, 0.15);
+  color: #d9534f;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.details-banner.lock {
+  background: rgba(230, 162, 60, 0.14);
+  border-color: rgba(230, 162, 60, 0.4);
+  color: #a86a12;
 }
 .project-row { cursor: pointer; }
 .project-row.row-selected { background: rgba(64, 132, 214, 0.16); }

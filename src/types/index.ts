@@ -288,10 +288,19 @@ export interface ConversationMessage {
   createdAt: string
 }
 
+export interface ProjectLockHolder {
+  pid: number
+  sessionId?: string | null
+  instance?: string | null
+  acquiredAt?: string | null
+}
+
 export interface GhidraProjectInfo {
   name: string
   sessionCount: number
   fileCount: number
+  /** Present while a session holds the project. */
+  locked?: ProjectLockHolder | null
 }
 
 export interface ChatTurnResponse {
