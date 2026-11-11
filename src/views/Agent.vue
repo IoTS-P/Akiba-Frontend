@@ -346,6 +346,15 @@
               <span class="interruption-line"></span>
             </div>
           </template>
+          <div
+            v-for="(n, i) in danglingNotices"
+            :key="`notice-${i}`"
+            class="interruption-note"
+          >
+            <span class="interruption-line"></span>
+            <span class="interruption-text">{{ n.text }}</span>
+            <span class="interruption-line"></span>
+          </div>
           <!-- Tool calls that are running right now.  The server pushes a
                tool_start event when a tool begins, so the card appears while
                the work is happening instead of only once it is stored. -->
@@ -807,7 +816,18 @@ const loadingSessions = ref(false)
 const loadingMessages = ref(false)
 const showNewModal = ref(false)
 const creatingSession = ref(false)
-const sending = ref(false)
+/**
+ * Session whose turn this tab is currently awaiting.
+ *
+ * A global boolean was wrong: while session A's /chat was in flight, sending in
+ * session B returned early and showed nothing at all.
+ */
+const sendingSessionId = ref<string | null>(null)
+
+/** True only when the turn in flight belongs to the session on screen. */
+const sending = computed(() =>
+  sendingSessionId.value !== null && sendingSessionId.value === activeSessionId.value
+)
 
 /** The row of the session in view, kept fresh by the session-status poller. */
 const activeSessionRow = computed(() =>
@@ -1449,13 +1469,13 @@ async function refreshMessages() {
     messages.value = nextMessages
     // Keep an unacknowledged optimistic user bubble on screen until the
     // DB transcript actually contains it.
-    const pending = pendingOptimistic
-    if (pending && pending.sessionId === polledSessionId) {
-      const arrived = nextMessages.some(m => m.role === 'user' && m.content === pending.msg.content)
+    const pending = pendingOptimistic.get(polledSessionId)
+    if (pending) {
+      const arrived = nextMessages.some(m => m.role === 'user' && m.content === pending.content)
       if (arrived) {
-        pendingOptimistic = null
+        pendingOptimistic.delete(polledSessionId)
       } else {
-        messages.value = [...nextMessages, pending.msg]
+        messages.value = [...nextMessages, pending]
       }
     }
     // Use backend-provided token stats; update even when message text is unchanged.
@@ -1858,7 +1878,6 @@ function stopListPolling() {
 async function selectSession(id: string) {
   activeSessionId.value = id
   errorMsg.value = ''
-  pendingOptimistic = null
   messages.value = []
   selectedWakeIndex.value = -1
   tokenUsage.value = null
@@ -2013,14 +2032,21 @@ async function deleteSession(id: string) {
  * without it and the bubble "flashes" out and back in.  refreshMessages
  * re-appends this bubble until the fetched transcript contains it.
  */
-let pendingOptimistic: { sessionId: string; msg: AgentMessage } | null = null
+/**
+ * User bubbles the server has not stored yet, keyed by session id.
+ *
+ * A turn that dies (dead model, failed worker) leaves no user row behind, so
+ * the bubble has to survive switching away and back on the client side.
+ */
+const pendingOptimistic = new Map<string, AgentMessage>()
 
 async function sendMessage() {
   if (!activeSessionId.value || !input.value.trim() || sending.value) return
   const content = input.value
+  const sessionForSend = activeSessionId.value
   input.value = ''
   errorMsg.value = ''
-  sending.value = true
+  sendingSessionId.value = activeSessionId.value
   startMessagePolling(ACTIVE_CHAT_POLL_MS)
 
   // For transient injects, skip the optimistic message — a
@@ -2045,7 +2071,7 @@ async function sendMessage() {
     // manual-agent worker writes it only after its JVM + Ghidra boot,
     // several seconds in) — without this the bubble vanishes for a
     // few seconds right after sending.
-    pendingOptimistic = { sessionId: activeSessionId.value, msg: tempUser }
+    if (activeSessionId.value) pendingOptimistic.set(activeSessionId.value, tempUser)
   }
   await scrollToBottom()
 
@@ -2103,7 +2129,7 @@ async function sendMessage() {
       if (tempUser) {
         messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
       }
-      pendingOptimistic = null
+      if (sessionForSend) pendingOptimistic.delete(sessionForSend)
       const status = e?.response?.status
       const detail = e?.response?.data?.error
       if (status === 409) {
@@ -2117,7 +2143,7 @@ async function sendMessage() {
       if (status !== 409) input.value = content
     }
   } finally {
-    sending.value = false
+    if (sendingSessionId.value === sessionForSend) sendingSessionId.value = null
     startMessagePolling()
   }
 }
@@ -2199,6 +2225,12 @@ interface InterruptionNotice {
 
 /** Notes pinned after the message that was on screen when the turn stopped. */
 const interruptionNotices = ref<InterruptionNotice[]>([])
+
+/** Notices whose anchor message is gone, or that arrived with no transcript. */
+const danglingNotices = computed(() => {
+  const ids = new Set(visibleMessages.value.map(m => m.messageId))
+  return interruptionNotices.value.filter(n => n.afterId === null || !ids.has(n.afterId))
+})
 
 function noticeAfter(messageId: number): string | null {
   return interruptionNotices.value.find(n => n.afterId === messageId)?.text ?? null
@@ -4235,11 +4267,12 @@ watch(
 
 .pending-spinner {
   display: inline-block;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
   border-radius: 50%;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border: 2px solid #d6d9de;
+  border-top-color: #4a7dff;
   animation: live-tool-spin 0.8s linear infinite;
   vertical-align: middle;
 }
