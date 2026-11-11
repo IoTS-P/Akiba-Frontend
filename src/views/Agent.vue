@@ -340,7 +340,23 @@
             <div v-else class="content" v-html="renderMarkdown(displayContent(m))"></div>
             </template>
           </div>
+            <div v-if="noticeAfter(m.messageId)" class="interruption-note">
+              <span class="interruption-line"></span>
+              <span class="interruption-text">{{ noticeAfter(m.messageId) }}</span>
+              <span class="interruption-line"></span>
+            </div>
           </template>
+          <!-- Tool calls that are running right now.  The server pushes a
+               tool_start event when a tool begins, so the card appears while
+               the work is happening instead of only once it is stored. -->
+          <div v-if="liveTools.length" class="live-tools">
+            <div v-for="t in liveTools" :key="t.id" class="live-tool">
+              <span class="live-tool-spinner"></span>
+              <span class="live-tool-name">{{ t.name }}</span>
+              <span class="live-tool-args">{{ t.args }}</span>
+              <span class="live-tool-elapsed">{{ elapsedLabel(t.startedAt) }}</span>
+            </div>
+          </div>
           <!-- Transient messages after the last server message (not yet answered) -->
           <div v-if="sending" class="msg assistant pending">
             <div class="role">Akiba</div>
@@ -2106,9 +2122,85 @@ async function sendMessage() {
 async function onComposerStop() {
   if (!turnRunning.value) return
   const pending = input.value
+  markInterruption(pending.trim() ? '对话已中断，已发送新的消息' : '对话已中止')
   await cancelChat()
   await waitUntilIdle()
   if (pending.trim()) await sendMessage()
+}
+
+interface LiveTool {
+  id: string
+  name: string
+  args: string
+  startedAt: number
+}
+
+/** Tool calls that are running right now, in start order. */
+const liveTools = ref<LiveTool[]>([])
+/** Bumped once a second so the live timers advance. */
+const clockTick = ref(Date.now())
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+function startClock() {
+  if (clockTimer) return
+  clockTimer = setInterval(() => { clockTick.value = Date.now() }, 1000)
+}
+
+function stopClock() {
+  if (!clockTimer) return
+  clearInterval(clockTimer)
+  clockTimer = null
+}
+
+/** Seconds a tool has been running, as a short label. */
+function elapsedLabel(startedAt: number): string {
+  const secs = Math.max(0, Math.round((clockTick.value - startedAt) / 1000))
+  if (secs < 60) return `${secs}s`
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
+
+/** Fold a tool_start / tool_end event into the live list. */
+function applyToolEvent(kind: string, payload: string) {
+  let info: { id?: string; name?: string; args?: string } | null = null
+  try {
+    info = JSON.parse(payload)
+  } catch {
+    return
+  }
+  const id = info?.id
+  if (!id) return
+  if (kind === 'tool_start') {
+    if (!liveTools.value.some(t => t.id === id)) {
+      liveTools.value = [
+        ...liveTools.value,
+        { id, name: info?.name ?? 'tool', args: info?.args ?? '', startedAt: Date.now() },
+      ]
+    }
+    startClock()
+  } else {
+    liveTools.value = liveTools.value.filter(t => t.id !== id)
+    if (!liveTools.value.length) stopClock()
+  }
+}
+
+interface InterruptionNotice {
+  afterId: number | null
+  text: string
+}
+
+/** Notes pinned after the message that was on screen when the turn stopped. */
+const interruptionNotices = ref<InterruptionNotice[]>([])
+
+function noticeAfter(messageId: number): string | null {
+  return interruptionNotices.value.find(n => n.afterId === messageId)?.text ?? null
+}
+
+function markInterruption(text: string) {
+  const last = visibleMessages.value[visibleMessages.value.length - 1]
+  interruptionNotices.value = [
+    ...interruptionNotices.value,
+    { afterId: last?.messageId ?? null, text },
+  ]
 }
 
 /** Wait for the aborted turn to settle before reusing the composer. */
@@ -2274,6 +2366,13 @@ let targetText = ''
 let typewriterTimer: number | null = null
 
 function startStreamPolling(sessionId: string) {
+  // Live state belongs to the session on screen: drop whatever the previous
+  // session left behind before this one starts reporting.
+  if (streamPollSession !== sessionId) {
+    liveTools.value = []
+    stopClock()
+    interruptionNotices.value = []
+  }
   // Always stop the previous poller — switching sessions must not
   // leak chunks from the old session into the new one's bubble.
   stopStreamPolling()
@@ -2360,6 +2459,13 @@ async function pollStreamChunksOnce() {
         if (chunk.seq > streamPollSince) streamPollSince = chunk.seq
       } else if (chunk.chunkCount > streamPollSince) {
         streamPollSince = chunk.chunkCount
+      }
+      // Tool lifecycle events share the stream but are not answer text:
+      // they drive the live tool cards instead of the typewriter.
+      if (chunk.kind === 'tool_start' || chunk.kind === 'tool_end') {
+        applyToolEvent(chunk.kind, chunk.delta)
+        gotNewChunks = true
+        continue
       }
       if (chunk.delta) {
         appendToTypewriter(chunk.delta)
@@ -4281,6 +4387,80 @@ watch(
 
 /* LLM selector + composer */
 /* Wide enough for the longest label so stopping never shifts the composer. */
+.live-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 4px 0 8px;
+}
+
+.live-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(640px, 100%);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.78rem;
+  color: var(--muted-foreground, #8a8f98);
+}
+
+.live-tool-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: live-tool-spin 0.8s linear infinite;
+}
+
+@keyframes live-tool-spin {
+  to { transform: rotate(360deg); }
+}
+
+.live-tool-name {
+  font-family: ui-monospace, monospace;
+  color: var(--foreground);
+}
+
+.live-tool-args {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+  opacity: 0.7;
+}
+
+.live-tool-elapsed {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.interruption-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  align-self: stretch;
+}
+
+.interruption-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.interruption-text {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground, #8a8f98);
+  white-space: nowrap;
+}
+
 .composer-submit {
   min-width: 10rem;
   justify-content: center;

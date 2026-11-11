@@ -248,6 +248,8 @@ export const agentApi = {
         byteCount: number
         done: boolean
         error?: string | null
+        /** `text` for answer deltas, `tool_start` / `tool_end` for tool events. */
+        kind?: string
       }>
     }>(`/agent/sessions/${sessionId}/stream-chunks`, { params: { since } }),
   deleteSession: (sessionId: string) =>
