@@ -222,6 +222,9 @@ export const agentApi = {
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/pause`),
   resume: (sessionId: string) =>
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/resume`),
+  /** Rename a conversation or point it at another program. */
+  updateSession: (sessionId: string, patch: { sessionName?: string; programName?: string }) =>
+    api.patch<import('@/types').AgentSession>(`/agent/sessions/${sessionId}`, patch),
   cancelChat: (sessionId: string) =>
     api.post<{ status: string; sessionId: string }>(`/agent/sessions/${sessionId}/cancel-chat`),
   retryNow: (sessionId: string) =>

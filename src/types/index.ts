@@ -136,6 +136,8 @@ export interface AgentSession {
   lifecycle?: string | null
   modelName: string | null
   projectName?: string | null
+  /** Program inside `projectName` the conversation is working on. */
+  currentProgram?: string | null
   moduleName?: string | null
   /** Workflow run that spawned this session (null for interactive sessions). */
   workflowId?: string | null

@@ -140,10 +140,27 @@
              the dedicated "Tree" modal/button has been removed. -->
         <div class="chat-header">
           <div class="chat-title">
-            <span
-              class="chat-title-name"
-              :title="activeSessionMeta ? `Agent UUID: ${activeSessionMeta.sessionId}` : ''"
-            >{{ activeSessionName }}</span>
+            <input
+              v-if="sessionRenameOpen"
+              ref="sessionRenameInput"
+              v-model="sessionNameDraft"
+              class="chat-title-input"
+              maxlength="120"
+              @keyup.enter="saveSessionName"
+              @keyup.esc="cancelSessionRename"
+              @blur="saveSessionName"
+            />
+            <template v-else>
+              <span
+                class="chat-title-name"
+                :title="activeSessionMeta ? `Agent UUID: ${activeSessionMeta.sessionId}` : ''"
+              >{{ activeSessionName }}</span>
+              <button
+                class="chat-title-edit"
+                title="Rename this conversation"
+                @click.stop="startSessionRename"
+              >✎</button>
+            </template>
             <span v-if="activeSessionMeta?.parentSessionId" class="chat-title-meta">
               ·
               <button
@@ -160,6 +177,25 @@
               a specific wake without scrolling through the entire
               conversation.  "-1" = "All" (show every message).
             -->
+            <!-- Which program inside the session's project the agent works on.
+                 The choice is stored on the session, so the next turn starts
+                 from it instead of picking the first program again. -->
+            <div
+              v-if="activeSessionMeta?.projectName"
+              class="program-picker"
+              :title="`Program inside project '${activeSessionMeta.projectName}'`"
+            >
+              <span class="program-picker-label">Program</span>
+              <select
+                class="program-picker-select"
+                :value="activeSessionMeta.currentProgram ?? ''"
+                :disabled="programBusy"
+                @change="onProgramChange"
+              >
+                <option value="">(first program)</option>
+                <option v-for="p in projectPrograms" :key="p" :value="p">{{ p }}</option>
+              </select>
+            </div>
             <select
               v-if="wakeSegments.length > 1"
               v-model.number="selectedWakeIndex"
@@ -574,7 +610,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { agentApi, llmConfigApi } from '@/services/api'
+import { agentApi, llmConfigApi, projectApi } from '@/services/api'
 import type { AgentSession, AgentMessage, SubAgentSummary } from '@/types'
 import type { StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
@@ -1875,6 +1911,73 @@ function stopListPolling() {
   }
 }
 
+const sessionRenameOpen = ref(false)
+const sessionNameDraft = ref('')
+const sessionRenameInput = ref<HTMLInputElement | null>(null)
+/** Programs of the active session's project, for the header picker. */
+const projectPrograms = ref<string[]>([])
+const programBusy = ref(false)
+
+function startSessionRename() {
+  sessionNameDraft.value = activeSessionName.value
+  sessionRenameOpen.value = true
+  nextTick(() => sessionRenameInput.value?.select())
+}
+
+function cancelSessionRename() {
+  sessionRenameOpen.value = false
+}
+
+/** Persist the new name, then reflect it locally so the header settles now. */
+async function saveSessionName() {
+  if (!sessionRenameOpen.value) return
+  const id = activeSessionId.value
+  const name = sessionNameDraft.value.trim()
+  sessionRenameOpen.value = false
+  if (!id || !name || name === activeSessionName.value) return
+  try {
+    await agentApi.updateSession(id, { sessionName: name })
+    const entry = findSessionById(id)
+    if (entry) entry.sessionName = name
+  } catch (e: any) {
+    errorMsg.value = e?.response?.data?.error || e?.message || 'Rename failed.'
+  }
+}
+
+/** Load the program list of the active session's project. */
+async function loadProjectPrograms() {
+  const project = activeSessionMeta.value?.projectName
+  if (!project) {
+    projectPrograms.value = []
+    return
+  }
+  try {
+    const { data } = await projectApi.tree(project)
+    projectPrograms.value = (data.entries ?? [])
+      .filter(e => !e.folder)
+      .map(e => e.path)
+  } catch {
+    projectPrograms.value = []
+  }
+}
+
+/** Point the conversation at another program. */
+async function onProgramChange(event: Event) {
+  const id = activeSessionId.value
+  const value = (event.target as HTMLSelectElement).value
+  if (!id) return
+  programBusy.value = true
+  try {
+    const { data } = await agentApi.updateSession(id, { programName: value || undefined })
+    const entry = findSessionById(id)
+    if (entry) entry.currentProgram = data.currentProgram ?? null
+  } catch (e: any) {
+    errorMsg.value = e?.response?.data?.error || e?.message || 'Could not switch program.'
+  } finally {
+    programBusy.value = false
+  }
+}
+
 async function selectSession(id: string) {
   activeSessionId.value = id
   errorMsg.value = ''
@@ -1891,6 +1994,7 @@ async function selectSession(id: string) {
   // previous session's streaming bubble, which must not linger while
   // the (potentially slow) getMessages below is in flight.
   startStreamPolling(id)
+  void loadProjectPrograms()
 
   // Set model name from session info. If the session isn't in the list
   // (e.g. a sub-agent opened from the tree), fall back to a global
@@ -4724,6 +4828,62 @@ watch(
   gap: 10px;
   min-width: 0;
 }
+.chat-title-edit {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: #8a8f98;
+  font-size: 0.85rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-title:hover .chat-title-edit {
+  opacity: 1;
+}
+
+.chat-title-edit:hover {
+  color: #4a7dff;
+}
+
+.chat-title-input {
+  min-width: 220px;
+  padding: 2px 8px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #4a7dff;
+  border-radius: 6px;
+  outline: none;
+}
+
+.program-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+.program-picker-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: #8a8f98;
+  text-transform: uppercase;
+}
+
+.program-picker-select {
+  max-width: 260px;
+  padding: 3px 6px;
+  font-size: 0.8rem;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d6d9de;
+  border-radius: 6px;
+}
+
 .chat-title-name {
   font-size: 15px;
   font-weight: 600;
