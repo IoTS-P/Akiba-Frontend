@@ -358,9 +358,9 @@
             </div>
           </div>
           <!-- Transient messages after the last server message (not yet answered) -->
-          <div v-if="sending" class="msg assistant pending">
+          <div v-if="turnRunning && !streamingText" class="msg assistant pending">
             <div class="role">Akiba</div>
-            <div class="content"><span class="dot-flash">Thinking…</span></div>
+            <div class="content"><span class="pending-spinner" aria-label="Working"></span></div>
           </div>
           <!-- LLM in-flight indicator: a single compact notice shown
                while an LLM call is running but no streaming text has
@@ -2104,8 +2104,17 @@ async function sendMessage() {
         messages.value = messages.value.filter((m) => m.messageId !== tempUser.messageId)
       }
       pendingOptimistic = null
-      errorMsg.value = e?.response?.data?.error || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
-      input.value = content
+      const status = e?.response?.status
+      const detail = e?.response?.data?.error
+      if (status === 409) {
+        // The project is held by another conversation.  The banner alone was
+        // easy to miss, so state it in the transcript where the turn died.
+        markInterruption(
+          detail || 'This project is in use by another conversation. Stop it there, then send again.',
+        )
+      }
+      errorMsg.value = detail || e?.message || (isManagedSession.value ? 'Inject failed.' : 'Chat failed.')
+      if (status !== 409) input.value = content
     }
   } finally {
     sending.value = false
@@ -2122,7 +2131,7 @@ async function sendMessage() {
 async function onComposerStop() {
   if (!turnRunning.value) return
   const pending = input.value
-  markInterruption(pending.trim() ? '对话已中断，已发送新的消息' : '对话已中止')
+  markInterruption(pending.trim() ? 'Conversation interrupted — new message sent' : 'Conversation stopped')
   await cancelChat()
   await waitUntilIdle()
   if (pending.trim()) await sendMessage()
@@ -4222,6 +4231,17 @@ watch(
 .tool-result-text {
   background: #1a1a2e;
   color: #e0e0e0;
+}
+
+.pending-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: live-tool-spin 0.8s linear infinite;
+  vertical-align: middle;
 }
 
 .dot-flash {

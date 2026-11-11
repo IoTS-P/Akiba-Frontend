@@ -20,6 +20,9 @@
       <button class="detail-btn" :disabled="selected.size !== 1" @click="openDetails">
         Details
       </button>
+      <button class="detail-btn" :disabled="selected.size !== 1 || !!renaming" @click="openRename">
+        {{ renaming ? 'Renaming…' : 'Rename' }}
+      </button>
       <button class="export-btn" :disabled="selected.size === 0 || exporting !== null" @click="exportSelected">
         {{ exporting ? 'Exporting…' : 'Export .gar' }}
       </button>
@@ -263,6 +266,39 @@
         </ul>
       </div>
     </div>
+    <div v-if="renameTarget !== null" class="modal-overlay" @click.self="closeRename">
+      <div class="modal-content rename-modal">
+        <div class="modal-header">
+          <h3>Rename Ghidra project</h3>
+          <button class="modal-close" :disabled="!!renaming" @click="closeRename">✕</button>
+        </div>
+        <div class="rename-body">
+          <label class="rename-label">New name</label>
+          <input
+            v-model="renameValue"
+            class="rename-input"
+            :disabled="!!renaming"
+            @keyup.enter="submitRename"
+            @keyup.esc="closeRename"
+          />
+          <div v-if="renameError" class="rename-error">{{ renameError }}</div>
+          <p class="rename-hint">
+            The project folder moves with the name. A conversation that still refers to
+            <code>{{ renameTarget }}</code> keeps its old label; start it again to use the new one.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" :disabled="!!renaming" @click="closeRename">Cancel</button>
+          <button
+            class="btn-primary"
+            :disabled="!!renaming || !renameValue.trim() || renameValue.trim() === renameTarget"
+            @click="submitRename"
+          >
+            {{ renaming ? 'Renaming…' : 'Rename' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -273,6 +309,44 @@ import type { FileEntry } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
 
 const projects = ref<GhidraProjectInfo[]>([])
+/** Name of the project being renamed, or null when the dialog is closed. */
+const renameTarget = ref<string | null>(null)
+const renameValue = ref('')
+/** Holds the name while the request is in flight, so the dialog stays open. */
+const renaming = ref<string | null>(null)
+const renameError = ref('')
+
+function openRename() {
+  const [name] = [...selected.value]
+  if (!name) return
+  renameTarget.value = name
+  renameValue.value = name
+  renameError.value = ''
+}
+
+function closeRename() {
+  if (renaming.value) return
+  renameTarget.value = null
+  renameError.value = ''
+}
+
+async function submitRename() {
+  const from = renameTarget.value
+  const to = renameValue.value.trim()
+  if (!from || !to || renaming.value || to === from) return
+  renaming.value = from
+  renameError.value = ''
+  try {
+    await projectApi.renameProject(from, to)
+    renameTarget.value = null
+    selected.value = new Set()
+    await fetchProjects()
+  } catch (e: any) {
+    renameError.value = e?.response?.data?.error || e?.message || 'Rename failed.'
+  } finally {
+    renaming.value = null
+  }
+}
 const loading = ref(false)
 const error = ref<string | null>(null)
 const exporting = ref<string | null>(null)
@@ -1015,6 +1089,48 @@ async function deleteEntry(e: TreeEntry) {
 }
 .project-row { cursor: pointer; }
 .project-row.row-selected { background: rgba(64, 132, 214, 0.16); }
+.rename-modal {
+  width: min(520px, 92vw);
+}
+
+.rename-body {
+  padding: 18px 22px 6px;
+}
+
+.rename-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: inherit;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.rename-input:focus {
+  outline: none;
+  border-color: #4a7dff;
+}
+
+.rename-error {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #c0392b;
+}
+
+.rename-hint {
+  margin: 12px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #888;
+}
+
 .modal-content.details-modal {
   width: min(760px, 92vw);
   display: flex;

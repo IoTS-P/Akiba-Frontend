@@ -433,6 +433,8 @@ export const projectApi = {
       timeout: 0, // import can take a while for large archives
     })
   },
+  renameProject: (name: string, newName: string) =>
+    api.patch<{ name: string; renamed: boolean }>(`/projects/${encodeURIComponent(name)}`, { newName }),
   deleteProject: (name: string, deleteLogs: boolean = false, deleteAgentSessions: boolean = false, deleteWorkspace: boolean = false) =>
     api.delete(`/projects/${encodeURIComponent(name)}`, {
       params: { deleteLogs, deleteAgentSessions, deleteWorkspace },
