@@ -398,6 +398,25 @@ export const fileApi = {
     api.delete<{ message: string }>('/files', { data: { fileIds } })
 }
 
+export interface SystemMetrics {
+  cpu: { usagePercent: number; cores: number; loadAverage: number[] }
+  memory: {
+    totalBytes: number; usedBytes: number; availableBytes: number
+    usagePercent: number; swapTotalBytes: number; swapUsedBytes: number
+  }
+  disk: {
+    path: string; totalBytes: number; freeBytes: number; usedBytes: number
+    usagePercent: number; error?: string
+  }
+  processes: Array<{ pid: number; rssBytes: number; role: string; self: boolean }>
+  time: number
+}
+
+export const systemApi = {
+  /** CPU, memory, disk and the Akiba JVMs, read from /proc. */
+  metrics: () => api.get<SystemMetrics>('/system/metrics'),
+}
+
 export const projectApi = {
   list: () => api.get<{ projects: import('@/types').GhidraProjectInfo[] }>('/projects'),
   /** Folder tree of a project (Ghidra projects are folder trees, not flat lists). */
