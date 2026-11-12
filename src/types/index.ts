@@ -82,14 +82,6 @@ export interface ScriptRunResponse {
   message: string
 }
 
-export interface WorkflowStatus {
-  id: string
-  status: string
-  progress: number
-  successCount: number
-  failCount: number
-}
-
 export interface QueryResponse {
   columns: string[]
   rows: any[][]
