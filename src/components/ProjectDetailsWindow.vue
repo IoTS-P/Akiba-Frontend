@@ -16,6 +16,7 @@
       <div v-if="locked" class="pdw-banner lock">
         In use by session {{ lockInfo?.sessionId || '?' }} — editing is disabled.
       </div>
+      <div v-if="notice" class="pdw-banner note">{{ notice }}</div>
       <div v-if="error" class="pdw-banner">{{ error }}</div>
 
       <div class="pdw-toolbar">
@@ -144,6 +145,7 @@ const entries = ref<TreeEntry[]>([])
 const loading = ref(false)
 const busy = ref(false)
 const error = ref<string | null>(null)
+const notice = ref<string | null>(null)
 const lockInfo = ref<{ sessionId?: string } | null>(null)
 const locked = computed(() => !!lockInfo.value)
 const currentFolder = ref('')
@@ -395,23 +397,59 @@ function readDragPayload(ev: DragEvent): { project: string; paths: string[] } | 
   return null
 }
 
+/**
+ * Warn when conversations hang off the entries about to move.
+ *
+ * They are re-pointed at the target project automatically, which is why the
+ * user is told first rather than discovering it afterwards.
+ */
+async function confirmSessionMigration(paths: string[], sourceProject: string): Promise<boolean> {
+  const affected: string[] = []
+  for (const path of paths) {
+    try {
+      const { data } = await projectApi.entrySessions(sourceProject, path)
+      for (const s of data.sessions ?? []) affected.push(s.sessionName || s.sessionId)
+    } catch {
+      // The lookup is advisory; a failed one must not block the move.
+    }
+  }
+  if (!affected.length) return true
+  const shown = affected.slice(0, 5).join(', ')
+  const more = affected.length > 5 ? ` (+${affected.length - 5} more)` : ''
+  return window.confirm(
+    `${affected.length} conversation(s) are attached to what you are moving: ${shown}${more}.\n\n` +
+      `They will be migrated to project '${props.project}' automatically. Continue?`,
+  )
+}
+
 /** Move (default) or copy entries that belong to a different project. */
 async function transferAcrossProjects(payload: { project: string; paths: string[] }, target: string, copy: boolean) {
   if (busy.value) return
+  if (!copy) {
+    const proceed = await confirmSessionMigration(payload.paths, payload.project)
+    if (!proceed) return
+  }
+  notice.value = null
   busy.value = true
   error.value = null
   const failures: string[] = []
+  let migrated = 0
   for (const path of payload.paths) {
     try {
-      await projectApi.transferEntry(props.project, {
+      const { data } = await projectApi.transferEntry(props.project, {
         fromProject: payload.project,
         path,
         targetFolder: target,
         move: !copy,
       })
+      migrated += data.migratedSessions ?? 0
     } catch (e: any) {
       failures.push(`${path.split('/').pop()}: ${e?.response?.data?.error || e?.message || 'failed'}`)
     }
+  }
+  if (migrated > 0) {
+    notice.value = `${migrated} conversation(s) moved to '${props.project}'.`
+    window.setTimeout(() => { notice.value = null }, 6000)
   }
   busy.value = false
   if (failures.length) error.value = failures.join('\n')
@@ -691,6 +729,11 @@ onUnmounted(() => {
   background: #fdecea;
   border-radius: 6px;
   white-space: pre-wrap;
+}
+
+.pdw-banner.note {
+  color: #1a5d2b;
+  background: #e7f6ec;
 }
 
 .pdw-banner.lock {
