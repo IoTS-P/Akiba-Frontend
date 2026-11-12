@@ -112,6 +112,8 @@
           :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
           @click.self="ctxMenu.show = false"
         >
+          <div class="ctx-menu-item" @click="renameFromMenu">✎ Rename conversation</div>
+          <div class="ctx-menu-divider"></div>
           <div class="ctx-menu-item" @click="exportSession(ctxMenu.sessionId)">📥 Export this session</div>
           <div class="ctx-menu-item" @click="exportSessionTree(ctxMenu.sessionId)">🌳 Export full tree (this + sub-agents)</div>
         </div>
@@ -1917,6 +1919,15 @@ const sessionRenameInput = ref<HTMLInputElement | null>(null)
 /** Programs of the active session's project, for the header picker. */
 const projectPrograms = ref<string[]>([])
 const programBusy = ref(false)
+
+/** Rename the session picked in the sidebar: open it, then edit the title. */
+async function renameFromMenu() {
+  const id = ctxMenu.sessionId
+  ctxMenu.show = false
+  if (!id) return
+  if (activeSessionId.value !== id) await selectSession(id)
+  startSessionRename()
+}
 
 function startSessionRename() {
   sessionNameDraft.value = activeSessionName.value
@@ -4829,12 +4840,14 @@ watch(
   min-width: 0;
 }
 .chat-title-edit {
-  margin-left: 6px;
-  padding: 0 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
   border: none;
+  border-radius: 5px;
   background: none;
   color: #8a8f98;
-  font-size: 0.85rem;
+  font-size: 1.15rem;
+  line-height: 1;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -4846,6 +4859,13 @@ watch(
 
 .chat-title-edit:hover {
   color: #4a7dff;
+  background: rgba(74, 125, 255, 0.08);
+}
+
+.ctx-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border, #e3e6ea);
 }
 
 .chat-title-input {

@@ -406,6 +406,16 @@ export const projectApi = {
       `/projects/${encodeURIComponent(projectName)}/tree`),
   createFolder: (projectName: string, parentPath: string, name: string) =>
     api.post<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/folders`, { path: parentPath, name }),
+  /** Move an entry into another folder of the same project. */
+  moveEntry: (projectName: string, path: string, targetFolder: string, newName?: string) =>
+    api.patch<{ status: string; path: string }>(`/projects/${encodeURIComponent(projectName)}/entries`, {
+      path, targetFolder, newName,
+    }),
+  /** Copy an entry (folder copies recursively) into another folder. */
+  copyEntry: (projectName: string, path: string, targetFolder: string) =>
+    api.post<{ status: string; path: string }>(`/projects/${encodeURIComponent(projectName)}/entries/copy`, {
+      path, targetFolder,
+    }),
   renameEntry: (projectName: string, path: string, newName: string) =>
     api.patch<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/entries`, { path, newName }),
   deleteEntry: (projectName: string, path: string) =>

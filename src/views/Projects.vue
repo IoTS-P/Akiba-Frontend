@@ -231,39 +231,81 @@
           until that conversation ends.
         </div>
 
-        <ul class="tree">
-          <li
-            v-for="e in details.entries"
-            :key="e.path"
-            class="tree-row"
-            :class="{ 'tree-row-target': e.folder && details.selectedFolder === e.path }"
-            :style="{ paddingLeft: 10 + depthOf(e) * 18 + 'px' }"
-            @click="selectFolder(e)"
+        <div class="tree-wrap">
+          <!-- Marquee selection: drawn while dragging on empty space. -->
+          <div
+            v-if="marquee.active"
+            class="marquee-box"
+            :style="marqueeStyle"
+          ></div>
+          <ul
+            class="tree"
+            @mousedown.self="startMarquee"
+            @contextmenu.prevent.self="openBackgroundMenu"
           >
-            <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
+            <li
+              v-for="e in details.entries"
+              :key="e.path"
+              class="tree-row"
+              :class="{
+                'tree-row-target': e.folder && details.selectedFolder === e.path,
+                'tree-row-selected': selection.has(e.path),
+                'tree-row-drop': dropTarget === e.path,
+              }"
+              :style="{ paddingLeft: 10 + depthOf(e) * 18 + 'px' }"
+              :data-path="e.path"
+              draggable="true"
+              @click="onRowClick(e, $event)"
+              @contextmenu.prevent.stop="openEntryMenu(e, $event)"
+              @dragstart="onRowDragStart(e, $event)"
+              @dragend="onDragEnd"
+              @dragover.prevent="onRowDragOver(e, $event)"
+              @dragleave="onRowDragLeave(e)"
+              @drop.prevent="onRowDrop(e, $event)"
+            >
+              <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
 
-            <input
-              v-if="editingPath === e.path"
-              ref="renameInput"
-              v-model="editValue"
-              class="tree-edit"
-              @keyup.enter="commitRename(e)"
-              @keyup.esc="cancelRename"
-              @blur="commitRename(e)"
-            />
-            <span v-else class="tree-name" :title="e.path" @dblclick="startRename(e)">{{ e.name }}</span>
+              <input
+                v-if="editingPath === e.path"
+                ref="renameInput"
+                v-model="editValue"
+                class="tree-edit"
+                @keyup.enter="commitRename(e)"
+                @keyup.esc="cancelRename"
+                @blur="commitRename(e)"
+              />
+              <span v-else class="tree-name" :title="e.path" @dblclick="startRename(e)">{{ e.name }}</span>
 
-            <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
-            <span v-if="editingPath !== e.path" class="tree-actions">
-              <button class="link-btn" @click.stop="startRename(e)">rename</button>
-              <button class="link-btn danger" @click.stop="deleteEntry(e)">delete</button>
-            </span>
-            <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
-          </li>
-          <li v-if="details.entries.length === 0 && !details.loading" class="tree-empty">
-            {{ details.stale ? 'No index yet — the project is in use, refresh after the session ends.' : 'Empty project — no programs yet.' }}
-          </li>
-        </ul>
+              <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
+              <span v-if="editingPath !== e.path" class="tree-actions">
+                <button class="link-btn" @click.stop="startRename(e)">rename</button>
+                <button class="link-btn danger" @click.stop="deleteEntry(e)">delete</button>
+              </span>
+              <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
+            </li>
+            <li v-if="details.entries.length === 0 && !details.loading" class="tree-empty">
+              {{ details.stale ? 'No index yet — the project is in use, refresh after the session ends.' : 'Empty project — no programs yet.' }}
+            </li>
+          </ul>
+        </div>
+        <!-- Context menu for entries and for the empty area. -->
+        <div
+          v-if="entryMenu.show"
+          class="ctx-menu"
+          :style="{ left: entryMenu.x + 'px', top: entryMenu.y + 'px' }"
+        >
+          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuRename">✎ Rename</div>
+          <div class="ctx-menu-item" @click="menuNewFolder">📁 New folder here</div>
+          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuCopy">⧉ Copy</div>
+          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuCut">✂ Cut</div>
+          <div
+            v-if="clipboard"
+            class="ctx-menu-item"
+            @click="menuPaste"
+          >📋 Paste {{ clipboard.mode === 'cut' ? '(move)' : '(copy)' }}</div>
+          <div v-if="entryMenu.path" class="ctx-menu-sep"></div>
+          <div v-if="entryMenu.path" class="ctx-menu-item danger" @click="menuDelete">🗑 Delete</div>
+        </div>
       </div>
     </div>
     <div v-if="renameTarget !== null" class="modal-overlay" @click.self="closeRename">
@@ -303,7 +345,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { projectApi, fileApi } from '@/services/api'
 import type { FileEntry } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
@@ -384,6 +426,256 @@ const binaries = ref<FileEntry[]>([])
 const binariesLoading = ref(false)
 const importBinaryId = ref<number | null>(null)
 const importFolder = ref('')
+
+// ---------------------------------------------------------------------------
+//  In-project file manager: selection, drag to move, ctrl-drag to copy,
+//  context menu with copy/cut/paste — the operations people expect from an
+//  operating system's file browser.
+// ---------------------------------------------------------------------------
+
+const selection = ref<Set<string>>(new Set())
+/** Pending copy/cut payload, filled by the context menu or Ctrl+C / Ctrl+X. */
+const clipboard = ref<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null)
+const entryMenu = reactive({ show: false, x: 0, y: 0, path: '' })
+const dropTarget = ref<string | null>(null)
+const marquee = reactive({ active: false, x0: 0, y0: 0, x1: 0, y1: 0 })
+/** Entry the next shift-click extends from. */
+let selectionAnchor: string | null = null
+
+const marqueeStyle = computed(() => {
+  const left = Math.min(marquee.x0, marquee.x1)
+  const top = Math.min(marquee.y0, marquee.y1)
+  return {
+    left: left + 'px',
+    top: top + 'px',
+    width: Math.abs(marquee.x1 - marquee.x0) + 'px',
+    height: Math.abs(marquee.y1 - marquee.y0) + 'px',
+  }
+})
+
+function parentOf(path: string): string {
+  const idx = path.lastIndexOf('/')
+  return idx < 0 ? '' : path.slice(0, idx)
+}
+
+function setSelection(paths: string[]) {
+  selection.value = new Set(paths)
+}
+
+/** Click selects; Ctrl/Cmd toggles; Shift extends from the last click. */
+function onRowClick(e: { path: string; folder: boolean }, ev: MouseEvent) {
+  details.selectedFolder = e.folder ? e.path : parentOf(e.path)
+  if (ev.ctrlKey || ev.metaKey) {
+    const next = new Set(selection.value)
+    if (next.has(e.path)) next.delete(e.path)
+    else next.add(e.path)
+    selection.value = next
+    selectionAnchor = e.path
+    return
+  }
+  if (ev.shiftKey && selectionAnchor) {
+    const paths = details.entries.map(x => x.path)
+    const from = paths.indexOf(selectionAnchor)
+    const to = paths.indexOf(e.path)
+    if (from >= 0 && to >= 0) {
+      setSelection(paths.slice(Math.min(from, to), Math.max(from, to) + 1))
+      return
+    }
+  }
+  setSelection([e.path])
+  selectionAnchor = e.path
+}
+
+// ---- marquee selection -----------------------------------------------------
+
+function onMarqueeMove(ev: MouseEvent) {
+  marquee.x1 = ev.clientX
+  marquee.y1 = ev.clientY
+  const left = Math.min(marquee.x0, marquee.x1)
+  const right = Math.max(marquee.x0, marquee.x1)
+  const top = Math.min(marquee.y0, marquee.y1)
+  const bottom = Math.max(marquee.y0, marquee.y1)
+  const hit: string[] = []
+  document.querySelectorAll<HTMLElement>('.tree-row').forEach(row => {
+    const r = row.getBoundingClientRect()
+    if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) {
+      const path = row.dataset.path
+      if (path) hit.push(path)
+    }
+  })
+  setSelection(hit)
+}
+
+function onMarqueeUp() {
+  marquee.active = false
+  window.removeEventListener('mousemove', onMarqueeMove)
+  window.removeEventListener('mouseup', onMarqueeUp)
+}
+
+function startMarquee(ev: MouseEvent) {
+  if (ev.button !== 0) return
+  marquee.active = true
+  marquee.x0 = ev.clientX
+  marquee.y0 = ev.clientY
+  marquee.x1 = ev.clientX
+  marquee.y1 = ev.clientY
+  setSelection([])
+  window.addEventListener('mousemove', onMarqueeMove)
+  window.addEventListener('mouseup', onMarqueeUp)
+}
+
+// ---- drag to move, ctrl-drag to copy --------------------------------------
+
+function onRowDragStart(e: { path: string }, ev: DragEvent) {
+  if (!selection.value.has(e.path)) setSelection([e.path])
+  ev.dataTransfer?.setData('text/plain', [...selection.value].join('\n'))
+  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copyMove'
+}
+
+function onRowDragOver(e: { path: string; folder: boolean }, ev: DragEvent) {
+  const target = e.folder ? e.path : parentOf(e.path)
+  dropTarget.value = target
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
+  }
+}
+
+function onRowDragLeave(e: { path: string }) {
+  if (dropTarget.value === e.path) dropTarget.value = null
+}
+
+function onDragEnd() {
+  dropTarget.value = null
+}
+
+async function onRowDrop(e: { path: string; folder: boolean }, ev: DragEvent) {
+  const target = e.folder ? e.path : parentOf(e.path)
+  dropTarget.value = null
+  const paths = [...selection.value]
+  if (paths.length === 0) return
+  const copy = ev.ctrlKey || ev.metaKey
+  await transfer(paths, target, copy ? 'copy' : 'cut')
+}
+
+// ---- move / copy / paste ---------------------------------------------------
+
+/** Move or copy each path into [target]; the server de-duplicates copies. */
+async function transfer(paths: string[], target: string, mode: 'copy' | 'cut') {
+  if (!details.project || details.busy) return
+  details.busy = true
+  details.error = ''
+  const failures: string[] = []
+  for (const path of paths) {
+    // Dropping something into the folder that already holds it is a no-op.
+    if (mode === 'cut' && parentOf(path) === target) continue
+    try {
+      if (mode === 'copy') {
+        await projectApi.copyEntry(details.project, path, target)
+      } else {
+        await projectApi.moveEntry(details.project, path, target)
+      }
+    } catch (err: any) {
+      failures.push(`${path.split('/').pop()}: ${err?.response?.data?.error || err?.message || 'failed'}`)
+    }
+  }
+  details.busy = false
+  if (failures.length) details.error = failures.join('\n')
+  setSelection([])
+  await loadTree()
+}
+
+function openEntryMenu(e: { path: string }, ev: MouseEvent) {
+  if (!selection.value.has(e.path)) setSelection([e.path])
+  entryMenu.show = true
+  entryMenu.path = e.path
+  entryMenu.x = ev.clientX
+  entryMenu.y = ev.clientY
+}
+
+function openBackgroundMenu(ev: MouseEvent) {
+  entryMenu.show = true
+  entryMenu.path = ''
+  entryMenu.x = ev.clientX
+  entryMenu.y = ev.clientY
+}
+
+/** Folder the menu acts on: the clicked folder, or the parent of a file. */
+function menuTargetFolder(): string {
+  if (!entryMenu.path) return details.selectedFolder || ''
+  const entry = details.entries.find(x => x.path === entryMenu.path)
+  return entry?.folder ? entry.path : parentOf(entryMenu.path)
+}
+
+function menuRename() {
+  const entry = details.entries.find(x => x.path === entryMenu.path)
+  entryMenu.show = false
+  if (entry) startRename(entry)
+}
+
+function menuCopy() {
+  clipboard.value = { mode: 'copy', paths: [...selection.value] }
+  entryMenu.show = false
+}
+
+function menuCut() {
+  clipboard.value = { mode: 'cut', paths: [...selection.value] }
+  entryMenu.show = false
+}
+
+async function menuPaste() {
+  const target = menuTargetFolder()
+  const payload = clipboard.value
+  entryMenu.show = false
+  if (!payload) return
+  await transfer(payload.paths, target, payload.mode)
+  if (payload.mode === 'cut') clipboard.value = null
+}
+
+async function menuDelete() {
+  const paths = [...selection.value]
+  entryMenu.show = false
+  if (!paths.length) return
+  for (const path of paths) {
+    const entry = details.entries.find(x => x.path === path)
+    if (entry) await deleteEntry(entry)
+  }
+  setSelection([])
+}
+
+async function menuNewFolder() {
+  const target = menuTargetFolder()
+  entryMenu.show = false
+  const name = window.prompt('New folder name')
+  if (!name?.trim()) return
+  details.busy = true
+  try {
+    await projectApi.createFolder(details.project!, target, name.trim())
+    await loadTree()
+  } catch (e: any) {
+    details.error = e?.response?.data?.error || e?.message || 'Could not create the folder.'
+  } finally {
+    details.busy = false
+  }
+}
+
+/** Ctrl/Cmd+C, X, V and Delete act on the selection while Details is open. */
+function onDetailsKeydown(ev: KeyboardEvent) {
+  if (!details.open || !(ev.ctrlKey || ev.metaKey)) return
+  const target = document.activeElement as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  const key = ev.key.toLowerCase()
+  if (key === 'c' && selection.value.size) {
+    clipboard.value = { mode: 'copy', paths: [...selection.value] }
+    ev.preventDefault()
+  } else if (key === 'x' && selection.value.size) {
+    clipboard.value = { mode: 'cut', paths: [...selection.value] }
+    ev.preventDefault()
+  } else if (key === 'v' && clipboard.value) {
+    void transfer(clipboard.value.paths, details.selectedFolder || '', clipboard.value.mode)
+    if (clipboard.value.mode === 'cut') clipboard.value = null
+    ev.preventDefault()
+  }
+}
 
 async function fetchProjects() {
   loading.value = true
@@ -507,7 +799,22 @@ async function confirmDelete() {
   }
 }
 
-onMounted(fetchProjects)
+function onGlobalMouseDown(ev: MouseEvent) {
+  // Any click outside the entry menu dismisses it.
+  const el = ev.target as HTMLElement | null
+  if (entryMenu.show && el && !el.closest('.ctx-menu')) entryMenu.show = false
+}
+
+onMounted(() => {
+  void fetchProjects()
+  window.addEventListener('keydown', onDetailsKeydown)
+  window.addEventListener('mousedown', onGlobalMouseDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onDetailsKeydown)
+  window.removeEventListener('mousedown', onGlobalMouseDown)
+})
 // ---------------------------------------------------------------
 // Selection + the Ghidra-style project browser
 // ---------------------------------------------------------------
@@ -635,12 +942,6 @@ async function loadBinaries() {
 }
 
 /** Point the import control at a folder when its tree row is clicked. */
-function selectFolder(e: TreeEntry) {
-  if (!e.folder || editingPath.value !== null) return
-  details.selectedFolder = e.path
-  importFolder.value = e.path
-}
-
 async function importBinary() {
   if (importBinaryId.value === null) return
   details.importing = true
@@ -1129,6 +1430,61 @@ async function deleteEntry(e: TreeEntry) {
   font-size: 0.75rem;
   line-height: 1.5;
   color: #888;
+}
+
+.tree-wrap {
+  position: relative;
+  min-height: 220px;
+}
+
+.marquee-box {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid #4a7dff;
+  background: rgba(74, 125, 255, 0.12);
+  pointer-events: none;
+}
+
+.tree-row-selected {
+  background: rgba(74, 125, 255, 0.14);
+}
+
+.tree-row-drop {
+  outline: 2px dashed #4a7dff;
+  outline-offset: -2px;
+  background: rgba(74, 125, 255, 0.08);
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  padding: 4px 0;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.ctx-menu-item {
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ctx-menu-item:hover {
+  background: rgba(74, 125, 255, 0.1);
+}
+
+.ctx-menu-item.danger {
+  color: #c0392b;
+}
+
+.ctx-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: #eceef1;
 }
 
 .modal-content.details-modal {
