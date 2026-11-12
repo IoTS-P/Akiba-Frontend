@@ -104,7 +104,9 @@
       <div v-if="menu.path" class="pdw-menu-item" @click="menuCopy">⧉ Copy</div>
       <div v-if="menu.path" class="pdw-menu-item" @click="menuCut">✂ Cut</div>
       <div v-if="clipboard" class="pdw-menu-item" @click="menuPaste">
-        📋 Paste {{ clipboard.mode === 'cut' ? '(move)' : '(copy)' }}
+        📋 Paste
+        {{ clipboard.mode === 'cut' ? '(move)' : '(copy)' }}
+        <span v-if="clipboard.project !== project" class="pdw-menu-hint">from {{ clipboard.project }}</span>
       </div>
       <div v-if="clipboard && !menu.path && currentFolder" class="pdw-menu-item" @click="menuPasteToParent">
         ↩ Paste into parent ({{ parentOf(currentFolder) || 'root' }})
@@ -114,8 +116,20 @@
   </div>
 </template>
 
+<script lang="ts">
+import { ref } from 'vue'
+
+/**
+ * Clipboard shared by every detail window.
+ *
+ * It used to live inside the component, so a Copy in one window left the other
+ * windows without a Paste entry — and cross-project paste is the whole point.
+ */
+export const detailsClipboard = ref<{ mode: 'copy' | 'cut'; project: string; paths: string[] } | null>(null)
+</script>
+
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { projectApi, fileApi } from '@/services/api'
 
 interface TreeEntry { path: string; name: string; folder: boolean; size: number }
@@ -134,7 +148,7 @@ const lockInfo = ref<{ sessionId?: string } | null>(null)
 const locked = computed(() => !!lockInfo.value)
 const currentFolder = ref('')
 const selection = ref<Set<string>>(new Set())
-const clipboard = ref<{ mode: 'copy' | 'cut'; project: string; paths: string[] } | null>(null)
+const clipboard = detailsClipboard
 const dropTarget = ref<string | null>(null)
 const marquee = reactive({ active: false, x0: 0, y0: 0, x1: 0, y1: 0 })
 const menu = reactive({ show: false, x: 0, y: 0, path: '' })
@@ -808,4 +822,10 @@ onUnmounted(() => {
 
 .pdw-menu-item:hover { background: rgba(74, 125, 255, 0.1); }
 .pdw-menu-item.danger { color: #c0392b; }
+
+.pdw-menu-hint {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  color: #9aa0a8;
+}
 </style>
