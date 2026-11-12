@@ -65,6 +65,8 @@
     <main class="main-content">
       <header class="header">
         <h1>{{ currentRoute }}</h1>
+        <!-- Always visible, whichever page is open. -->
+        <SystemStatus />
       </header>
       <div class="content">
         <router-view />
@@ -78,6 +80,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
+import SystemStatus from '@/components/SystemStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -234,8 +237,12 @@ async function handleLogout() {
 }
 
 .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   background: #fff;
-  padding: 20px 30px;
+  padding: 14px 30px;
   border-bottom: 1px solid #e0e0e0;
 }
 
