@@ -193,7 +193,7 @@
           <input
             v-model="details.newFolder"
             class="details-input"
-            placeholder="New folder name"
+            :placeholder="`New folder in ${currentFolder || 'root'}`"
             @keyup.enter="createFolder"
           />
           <button class="btn-primary" :disabled="!details.newFolder.trim() || details.busy || !!detailsLock" @click="createFolder">
@@ -231,6 +231,18 @@
           until that conversation ends.
         </div>
 
+        <!-- Current folder: the list below shows its direct children only. -->
+        <div class="fb-bar">
+          <button class="fb-up" :disabled="!currentFolder" title="Up one level" @click="goUp">↑</button>
+          <nav class="fb-crumbs">
+            <span class="fb-crumb" @click="enterFolder('')">project root</span>
+            <template v-for="(seg, i) in breadcrumbSegments" :key="i">
+              <span class="fb-sep">/</span>
+              <span class="fb-crumb" @click="enterFolder(pathUpTo(i))">{{ seg }}</span>
+            </template>
+          </nav>
+          <span class="fb-hint">Drop on empty space to put items here</span>
+        </div>
         <div class="tree-wrap">
           <!-- Marquee selection: drawn while dragging on empty space. -->
           <div
@@ -242,20 +254,22 @@
             class="tree"
             @mousedown.self="startMarquee"
             @contextmenu.prevent.self="openBackgroundMenu"
+            @dragover.prevent="onBackgroundDragOver"
+            @drop.prevent="onBackgroundDrop"
           >
             <li
-              v-for="e in details.entries"
+              v-for="e in visibleEntries"
               :key="e.path"
               class="tree-row"
               :class="{
-                'tree-row-target': e.folder && details.selectedFolder === e.path,
                 'tree-row-selected': selection.has(e.path),
                 'tree-row-drop': dropTarget === e.path,
               }"
-              :style="{ paddingLeft: 10 + depthOf(e) * 18 + 'px' }"
+              style="padding-left: 10px"
               :data-path="e.path"
               draggable="true"
               @click="onRowClick(e, $event)"
+              @dblclick="onRowDblClick(e)"
               @contextmenu.prevent.stop="openEntryMenu(e, $event)"
               @dragstart="onRowDragStart(e, $event)"
               @dragend="onDragEnd"
@@ -284,7 +298,13 @@
               <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
             </li>
             <li v-if="details.entries.length === 0 && !details.loading" class="tree-empty">
-              {{ details.stale ? 'No index yet — the project is in use, refresh after the session ends.' : 'Empty project — no programs yet.' }}
+              {{
+                details.stale
+                  ? 'No index yet — the project is in use, refresh after the session ends.'
+                  : currentFolder
+                    ? 'This folder is empty — drop items here or use New folder.'
+                    : 'Empty project — no programs yet.'
+              }}
             </li>
           </ul>
         </div>
@@ -433,6 +453,8 @@ const importFolder = ref('')
 //  operating system's file browser.
 // ---------------------------------------------------------------------------
 
+/** Folder being displayed; '' is the project root. */
+const currentFolder = ref('')
 const selection = ref<Set<string>>(new Set())
 /** Pending copy/cut payload, filled by the context menu or Ctrl+C / Ctrl+X. */
 const clipboard = ref<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null)
@@ -453,6 +475,29 @@ const marqueeStyle = computed(() => {
   }
 })
 
+/** Direct children of [currentFolder] — the only rows shown. */
+const visibleEntries = computed(() =>
+  details.entries.filter(e => parentOf(e.path) === currentFolder.value),
+)
+
+const breadcrumbSegments = computed(() =>
+  currentFolder.value ? currentFolder.value.split('/').filter(Boolean) : [],
+)
+
+/** Path of the first [i] + 1 breadcrumb segments. */
+function pathUpTo(i: number): string {
+  return breadcrumbSegments.value.slice(0, i + 1).join('/')
+}
+
+function enterFolder(path: string) {
+  currentFolder.value = path
+  setSelection([])
+}
+
+function goUp() {
+  enterFolder(parentOf(currentFolder.value))
+}
+
 function parentOf(path: string): string {
   const idx = path.lastIndexOf('/')
   return idx < 0 ? '' : path.slice(0, idx)
@@ -464,7 +509,6 @@ function setSelection(paths: string[]) {
 
 /** Click selects; Ctrl/Cmd toggles; Shift extends from the last click. */
 function onRowClick(e: { path: string; folder: boolean }, ev: MouseEvent) {
-  details.selectedFolder = e.folder ? e.path : parentOf(e.path)
   if (ev.ctrlKey || ev.metaKey) {
     const next = new Set(selection.value)
     if (next.has(e.path)) next.delete(e.path)
@@ -484,6 +528,11 @@ function onRowClick(e: { path: string; folder: boolean }, ev: MouseEvent) {
   }
   setSelection([e.path])
   selectionAnchor = e.path
+}
+
+/** Double-click opens a folder; files are opened by the agent, not here. */
+function onRowDblClick(e: { path: string; folder: boolean }) {
+  if (e.folder) enterFolder(e.path)
 }
 
 // ---- marquee selection -----------------------------------------------------
@@ -548,6 +597,20 @@ function onDragEnd() {
   dropTarget.value = null
 }
 
+/** Dragging over empty space targets the folder currently open. */
+function onBackgroundDragOver(ev: DragEvent) {
+  dropTarget.value = null
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
+  }
+}
+
+async function onBackgroundDrop(ev: DragEvent) {
+  const paths = [...selection.value]
+  if (paths.length === 0) return
+  await transfer(paths, currentFolder.value, (ev.ctrlKey || ev.metaKey) ? 'copy' : 'cut')
+}
+
 async function onRowDrop(e: { path: string; folder: boolean }, ev: DragEvent) {
   const target = e.folder ? e.path : parentOf(e.path)
   dropTarget.value = null
@@ -601,7 +664,7 @@ function openBackgroundMenu(ev: MouseEvent) {
 
 /** Folder the menu acts on: the clicked folder, or the parent of a file. */
 function menuTargetFolder(): string {
-  if (!entryMenu.path) return details.selectedFolder || ''
+  if (!entryMenu.path) return currentFolder.value
   const entry = details.entries.find(x => x.path === entryMenu.path)
   return entry?.folder ? entry.path : parentOf(entryMenu.path)
 }
@@ -671,7 +734,7 @@ function onDetailsKeydown(ev: KeyboardEvent) {
     clipboard.value = { mode: 'cut', paths: [...selection.value] }
     ev.preventDefault()
   } else if (key === 'v' && clipboard.value) {
-    void transfer(clipboard.value.paths, details.selectedFolder || '', clipboard.value.mode)
+    void transfer(clipboard.value.paths, currentFolder.value, clipboard.value.mode)
     if (clipboard.value.mode === 'cut') clipboard.value = null
     ev.preventDefault()
   }
@@ -900,10 +963,6 @@ const editValue = ref('')
 const rowError = ref<{ path: string; message: string } | null>(null)
 const renameInput = ref<HTMLInputElement[] | null>(null)
 
-function depthOf(e: TreeEntry): number {
-  return e.path.split('/').length - 1
-}
-
 function formatSize(bytes: number): string {
   if (!bytes) return ''
   if (bytes < 1024) return `${bytes} B`
@@ -959,7 +1018,10 @@ async function importBinary() {
   }
 }
 
+/** Reset to the root whenever a different project is opened. */
 async function loadTree() {
+  const known = new Set(details.entries.map(e => e.path))
+  if (currentFolder.value && !known.has(currentFolder.value)) currentFolder.value = ''
   details.loading = true
   details.error = null
   try {
@@ -980,7 +1042,7 @@ async function createFolder() {
   if (!name) return
   details.busy = true
   try {
-    await projectApi.createFolder(details.project, '', name)
+    await projectApi.createFolder(details.project, currentFolder.value, name)
     details.newFolder = ''
     await loadTree()
   } catch (e: any) {
@@ -1430,6 +1492,59 @@ async function deleteEntry(e: TreeEntry) {
   font-size: 0.75rem;
   line-height: 1.5;
   color: #888;
+}
+
+.fb-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #f6f7f9;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+}
+
+.fb-up {
+  padding: 2px 8px;
+  font-size: 0.9rem;
+  color: #4a7dff;
+  background: #fff;
+  border: 1px solid #d6d9de;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.fb-up:disabled {
+  color: #c3c8cf;
+  cursor: default;
+}
+
+.fb-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.fb-crumb {
+  color: #4a7dff;
+  cursor: pointer;
+}
+
+.fb-crumb:hover {
+  text-decoration: underline;
+}
+
+.fb-sep {
+  color: #b6bcc5;
+}
+
+.fb-hint {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: #9aa0a8;
 }
 
 .tree-wrap {
