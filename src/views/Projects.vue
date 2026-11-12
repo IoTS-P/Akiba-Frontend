@@ -604,8 +604,20 @@ function onDragEnd() {
   dropTarget.value = null
 }
 
+/**
+ * True when the drag is over a row, which handles its own target.
+ *
+ * The panel handler runs after the row's (bubbling), so without this guard it
+ * cleared the highlight the row had just set — the folder never lit up.
+ */
+function dragIsOverRow(ev: DragEvent): boolean {
+  const el = ev.target as HTMLElement | null
+  return !!el?.closest('.tree-row')
+}
+
 /** Dragging over empty space targets the folder currently open. */
 function onBackgroundDragOver(ev: DragEvent) {
+  if (dragIsOverRow(ev)) return
   dropTarget.value = null
   if (ev.dataTransfer) {
     ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
@@ -613,6 +625,7 @@ function onBackgroundDragOver(ev: DragEvent) {
 }
 
 async function onBackgroundDrop(ev: DragEvent) {
+  if (dragIsOverRow(ev)) return
   const paths = [...selection.value]
   if (paths.length === 0) return
   await transfer(paths, currentFolder.value, (ev.ctrlKey || ev.metaKey) ? 'copy' : 'cut')
