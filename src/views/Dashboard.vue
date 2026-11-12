@@ -35,7 +35,7 @@
       <div class="res-card">
         <div class="res-head">
           <span class="res-title">CPU</span>
-          <span class="res-value">{{ metrics ? metrics.cpu.usagePercent.toFixed(0) + '%' : '—' }}</span>
+          <span class="res-value">{{ metrics ? percent(metrics.cpu.usagePercent) : '—' }}</span>
         </div>
         <div class="res-bar"><div class="res-fill" :style="{ width: pct(metrics?.cpu.usagePercent) }"></div></div>
         <div class="res-sub">
@@ -45,7 +45,7 @@
       <div class="res-card">
         <div class="res-head">
           <span class="res-title">Memory</span>
-          <span class="res-value">{{ metrics ? metrics.memory.usagePercent.toFixed(0) + '%' : '—' }}</span>
+          <span class="res-value">{{ metrics ? percent(metrics.memory.usagePercent) : '—' }}</span>
         </div>
         <div class="res-bar">
           <div class="res-fill" :class="{ warn: (metrics?.memory.usagePercent ?? 0) > 85 }"
@@ -58,7 +58,7 @@
       <div class="res-card">
         <div class="res-head">
           <span class="res-title">Disk</span>
-          <span class="res-value">{{ metrics ? metrics.disk.usagePercent.toFixed(0) + '%' : '—' }}</span>
+          <span class="res-value">{{ metrics ? percent(metrics.disk.usagePercent) : '—' }}</span>
         </div>
         <div class="res-bar">
           <div class="res-fill" :class="{ warn: (metrics?.disk.usagePercent ?? 0) > 85 }"
@@ -137,6 +137,11 @@ async function loadMetrics() {
   } catch {
     metrics.value = null
   }
+}
+
+/** Render a percentage that may be missing on an older/broken payload. */
+function percent(value: number | undefined | null): string {
+  return (typeof value === 'number' && isFinite(value) ? value : 0).toFixed(0) + '%'
 }
 
 /** Clamp a percentage into a CSS width. */
