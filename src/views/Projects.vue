@@ -17,6 +17,7 @@
       </div>
     </div>
     <div class="project-toolbar">
+      <button class="detail-btn" @click="openCreateProject">+ New Project</button>
       <button class="detail-btn" :disabled="selected.size !== 1" @click="openDetails">
         Details
       </button>
@@ -179,162 +180,40 @@
       </div>
     </div>
 
-    <div v-if="details.open" class="modal-overlay" @click.self="closeDetails">
-      <div class="modal-content details-modal">
+    <div v-if="createModal.open" class="modal-overlay" @click.self="createModal.open = false">
+      <div class="modal-content rename-modal">
         <div class="modal-header">
-          <div>
-            <h3>{{ details.project }}</h3>
-            <p class="details-sub">{{ details.folders }} folders · {{ details.files }} programs</p>
-          </div>
-          <button class="modal-close" @click="closeDetails">×</button>
+          <h3>New Ghidra project</h3>
+          <button class="modal-close" :disabled="createModal.busy" @click="createModal.open = false">✕</button>
         </div>
-
-        <div class="details-toolbar">
+        <div class="rename-body">
+          <label class="rename-label">Project name</label>
           <input
-            v-model="details.newFolder"
-            class="details-input"
-            :placeholder="`New folder in ${currentFolder || 'root'}`"
-            @keyup.enter="createFolder"
+            v-model="createModal.name"
+            class="rename-input"
+            placeholder="e.g. firmware-car"
+            @keyup.enter="submitCreateProject"
           />
-          <button class="btn-primary" :disabled="!details.newFolder.trim() || details.busy || !!detailsLock" @click="createFolder">
-            New Folder
+          <div v-if="createModal.error" class="rename-error">{{ createModal.error }}</div>
+          <p class="rename-hint">Creates an empty project on compact disk. Import binaries from its details window.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" :disabled="createModal.busy" @click="createModal.open = false">Cancel</button>
+          <button class="btn-primary" :disabled="createModal.busy || !createModal.name.trim()" @click="submitCreateProject">
+            {{ createModal.busy ? 'Creating…' : 'Create' }}
           </button>
-          <button class="btn-secondary" :disabled="details.loading" @click="loadTree">Refresh</button>
-        </div>
-
-        <div class="details-import">
-          <select v-model="importBinaryId" class="details-input" :disabled="binariesLoading || details.importing">
-            <option :value="null">
-              {{ binariesLoading ? 'Loading binaries…' : 'Select a binary…' }}
-            </option>
-            <option v-for="b in binaries" :key="b.id" :value="b.id">
-              {{ b.name }} (#{{ b.id }})
-            </option>
-          </select>
-          <input
-            v-model="importFolder"
-            class="details-input import-target"
-            placeholder="Target folder (root)"
-          />
-          <button
-            class="btn-primary"
-            :disabled="importBinaryId === null || details.importing"
-            @click="importBinary"
-          >
-            {{ details.importing ? 'Importing…' : 'Import binary' }}
-          </button>
-        </div>
-
-        <div v-if="details.error" class="details-banner">{{ details.error }}</div>
-        <div v-if="detailsLock" class="details-banner lock">
-          In use by session {{ detailsLock.sessionId || '?' }} — editing is disabled
-          until that conversation ends.
-        </div>
-
-        <!-- Current folder: the list below shows its direct children only. -->
-        <div class="fb-bar">
-          <button class="fb-up" :disabled="!currentFolder" title="Up one level" @click="goUp">↑</button>
-          <nav class="fb-crumbs">
-            <span class="fb-crumb" @click="enterFolder('')">project root</span>
-            <template v-for="(seg, i) in breadcrumbSegments" :key="i">
-              <span class="fb-sep">/</span>
-              <span class="fb-crumb" @click="enterFolder(pathUpTo(i))">{{ seg }}</span>
-            </template>
-          </nav>
-          <span class="fb-hint">Drop on empty space to put items here</span>
-        </div>
-        <div
-          class="tree-wrap"
-          @contextmenu.prevent="openBackgroundMenu"
-          @dragover.prevent="onBackgroundDragOver"
-          @drop.prevent="onBackgroundDrop"
-        >
-          <!-- Marquee selection: drawn while dragging on empty space. -->
-          <div
-            v-if="marquee.active"
-            class="marquee-box"
-            :style="marqueeStyle"
-          ></div>
-          <ul
-            class="tree"
-            @mousedown.self="startMarquee"
-          >
-            <li
-              v-for="e in visibleEntries"
-              :key="e.path"
-              class="tree-row"
-              :class="{
-                'tree-row-selected': selection.has(e.path),
-                'tree-row-drop': dropTarget === e.path,
-              }"
-              style="padding-left: 10px"
-              :data-path="e.path"
-              draggable="true"
-              @click="onRowClick(e, $event)"
-              @dblclick="onRowDblClick(e)"
-              @contextmenu.prevent.stop="openEntryMenu(e, $event)"
-              @dragstart="onRowDragStart(e, $event)"
-              @dragend="onDragEnd"
-              @dragover.prevent="onRowDragOver(e, $event)"
-              @dragleave="onRowDragLeave(e)"
-              @drop.prevent="onRowDrop(e, $event)"
-            >
-              <span class="tree-icon">{{ e.folder ? (dropTarget === e.path ? '📂' : '📁') : '📦' }}</span>
-
-              <input
-                v-if="editingPath === e.path"
-                ref="renameInput"
-                v-model="editValue"
-                class="tree-edit"
-                @keyup.enter="commitRename(e)"
-                @keyup.esc="cancelRename"
-                @blur="commitRename(e)"
-              />
-              <span v-else class="tree-name" :title="e.path" @dblclick="startRename(e)">{{ e.name }}</span>
-
-              <span v-if="!e.folder" class="tree-size">{{ formatSize(e.size) }}</span>
-              <span v-if="editingPath !== e.path" class="tree-actions">
-                <button class="link-btn" @click.stop="startRename(e)">rename</button>
-                <button class="link-btn danger" @click.stop="deleteEntry(e)">delete</button>
-              </span>
-              <span v-if="rowError && rowError.path === e.path" class="tree-error">{{ rowError.message }}</span>
-            </li>
-            <li v-if="details.entries.length === 0 && !details.loading" class="tree-empty">
-              {{
-                details.stale
-                  ? 'No index yet — the project is in use, refresh after the session ends.'
-                  : currentFolder
-                    ? 'This folder is empty — drop items here or use New folder.'
-                    : 'Empty project — no programs yet.'
-              }}
-            </li>
-          </ul>
-        </div>
-        <!-- Context menu for entries and for the empty area. -->
-        <div
-          v-if="entryMenu.show"
-          class="ctx-menu"
-          :style="{ left: entryMenu.x + 'px', top: entryMenu.y + 'px' }"
-        >
-          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuRename">✎ Rename</div>
-          <div class="ctx-menu-item" @click="menuNewFolder">📁 New folder here</div>
-          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuCopy">⧉ Copy</div>
-          <div v-if="entryMenu.path" class="ctx-menu-item" @click="menuCut">✂ Cut</div>
-          <div
-            v-if="clipboard"
-            class="ctx-menu-item"
-            @click="menuPaste"
-          >📋 Paste {{ clipboard.mode === 'cut' ? '(move)' : '(copy)' }}</div>
-          <div
-            v-if="clipboard && !entryMenu.path && currentFolder"
-            class="ctx-menu-item"
-            @click="menuPasteToParent"
-          >↩ Paste into parent ({{ parentOf(currentFolder) || 'project root' }})</div>
-          <div v-if="entryMenu.path" class="ctx-menu-sep"></div>
-          <div v-if="entryMenu.path" class="ctx-menu-item danger" @click="menuDelete">🗑 Delete</div>
         </div>
       </div>
     </div>
+    <!-- Detail windows: floating, non-modal, one per project, closed on leaving the page. -->
+    <ProjectDetailsWindow
+      v-for="w in detailWindows"
+      :key="w.id"
+      :project="w.project"
+      :start-x="w.x"
+      :start-y="w.y"
+      @close="closeWindow(w.id)"
+    />
     <div v-if="renameTarget !== null" class="modal-overlay" @click.self="closeRename">
       <div class="modal-content rename-modal">
         <div class="modal-header">
@@ -372,9 +251,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
-import { projectApi, fileApi } from '@/services/api'
-import type { FileEntry } from '@/services/api'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import ProjectDetailsWindow from '@/components/ProjectDetailsWindow.vue'
+import { projectApi } from '@/services/api'
 import type { GhidraProjectInfo } from '@/types'
 
 const projects = ref<GhidraProjectInfo[]>([])
@@ -449,325 +329,6 @@ const garImportResult = ref<{
 const garImportError = ref<string | null>(null)
 
 // --- Binary import state ---
-const binaries = ref<FileEntry[]>([])
-const binariesLoading = ref(false)
-const importBinaryId = ref<number | null>(null)
-const importFolder = ref('')
-
-// ---------------------------------------------------------------------------
-//  In-project file manager: selection, drag to move, ctrl-drag to copy,
-//  context menu with copy/cut/paste — the operations people expect from an
-//  operating system's file browser.
-// ---------------------------------------------------------------------------
-
-/** Folder being displayed; '' is the project root. */
-const currentFolder = ref('')
-const selection = ref<Set<string>>(new Set())
-/** Pending copy/cut payload, filled by the context menu or Ctrl+C / Ctrl+X. */
-const clipboard = ref<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null)
-const entryMenu = reactive({ show: false, x: 0, y: 0, path: '' })
-const dropTarget = ref<string | null>(null)
-const marquee = reactive({ active: false, x0: 0, y0: 0, x1: 0, y1: 0 })
-/** Entry the next shift-click extends from. */
-let selectionAnchor: string | null = null
-
-const marqueeStyle = computed(() => {
-  const left = Math.min(marquee.x0, marquee.x1)
-  const top = Math.min(marquee.y0, marquee.y1)
-  return {
-    left: left + 'px',
-    top: top + 'px',
-    width: Math.abs(marquee.x1 - marquee.x0) + 'px',
-    height: Math.abs(marquee.y1 - marquee.y0) + 'px',
-  }
-})
-
-/** Direct children of [currentFolder] — the only rows shown. */
-const visibleEntries = computed(() =>
-  details.entries.filter(e => parentOf(e.path) === currentFolder.value),
-)
-
-const breadcrumbSegments = computed(() =>
-  currentFolder.value ? currentFolder.value.split('/').filter(Boolean) : [],
-)
-
-/** Path of the first [i] + 1 breadcrumb segments. */
-function pathUpTo(i: number): string {
-  return breadcrumbSegments.value.slice(0, i + 1).join('/')
-}
-
-function enterFolder(path: string) {
-  currentFolder.value = path
-  setSelection([])
-}
-
-function goUp() {
-  enterFolder(parentOf(currentFolder.value))
-}
-
-function parentOf(path: string): string {
-  const idx = path.lastIndexOf('/')
-  return idx < 0 ? '' : path.slice(0, idx)
-}
-
-function setSelection(paths: string[]) {
-  selection.value = new Set(paths)
-}
-
-/** Click selects; Ctrl/Cmd toggles; Shift extends from the last click. */
-function onRowClick(e: { path: string; folder: boolean }, ev: MouseEvent) {
-  if (ev.ctrlKey || ev.metaKey) {
-    const next = new Set(selection.value)
-    if (next.has(e.path)) next.delete(e.path)
-    else next.add(e.path)
-    selection.value = next
-    selectionAnchor = e.path
-    return
-  }
-  if (ev.shiftKey && selectionAnchor) {
-    const paths = details.entries.map(x => x.path)
-    const from = paths.indexOf(selectionAnchor)
-    const to = paths.indexOf(e.path)
-    if (from >= 0 && to >= 0) {
-      setSelection(paths.slice(Math.min(from, to), Math.max(from, to) + 1))
-      return
-    }
-  }
-  setSelection([e.path])
-  selectionAnchor = e.path
-}
-
-/** Double-click opens a folder; files are opened by the agent, not here. */
-function onRowDblClick(e: { path: string; folder: boolean }) {
-  if (e.folder) enterFolder(e.path)
-}
-
-// ---- marquee selection -----------------------------------------------------
-
-function onMarqueeMove(ev: MouseEvent) {
-  marquee.x1 = ev.clientX
-  marquee.y1 = ev.clientY
-  const left = Math.min(marquee.x0, marquee.x1)
-  const right = Math.max(marquee.x0, marquee.x1)
-  const top = Math.min(marquee.y0, marquee.y1)
-  const bottom = Math.max(marquee.y0, marquee.y1)
-  const hit: string[] = []
-  document.querySelectorAll<HTMLElement>('.tree-row').forEach(row => {
-    const r = row.getBoundingClientRect()
-    if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) {
-      const path = row.dataset.path
-      if (path) hit.push(path)
-    }
-  })
-  setSelection(hit)
-}
-
-function onMarqueeUp() {
-  marquee.active = false
-  window.removeEventListener('mousemove', onMarqueeMove)
-  window.removeEventListener('mouseup', onMarqueeUp)
-}
-
-function startMarquee(ev: MouseEvent) {
-  if (ev.button !== 0) return
-  marquee.active = true
-  marquee.x0 = ev.clientX
-  marquee.y0 = ev.clientY
-  marquee.x1 = ev.clientX
-  marquee.y1 = ev.clientY
-  setSelection([])
-  window.addEventListener('mousemove', onMarqueeMove)
-  window.addEventListener('mouseup', onMarqueeUp)
-}
-
-// ---- drag to move, ctrl-drag to copy --------------------------------------
-
-function onRowDragStart(e: { path: string }, ev: DragEvent) {
-  if (!selection.value.has(e.path)) setSelection([e.path])
-  ev.dataTransfer?.setData('text/plain', [...selection.value].join('\n'))
-  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copyMove'
-}
-
-function onRowDragOver(e: { path: string; folder: boolean }, ev: DragEvent) {
-  const target = e.folder ? e.path : parentOf(e.path)
-  dropTarget.value = target
-  if (ev.dataTransfer) {
-    ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
-  }
-}
-
-function onRowDragLeave(e: { path: string }) {
-  if (dropTarget.value === e.path) dropTarget.value = null
-}
-
-function onDragEnd() {
-  dropTarget.value = null
-}
-
-/**
- * True when the drag is over a row, which handles its own target.
- *
- * The panel handler runs after the row's (bubbling), so without this guard it
- * cleared the highlight the row had just set — the folder never lit up.
- */
-function dragIsOverRow(ev: DragEvent): boolean {
-  const el = ev.target as HTMLElement | null
-  return !!el?.closest('.tree-row')
-}
-
-/** Dragging over empty space targets the folder currently open. */
-function onBackgroundDragOver(ev: DragEvent) {
-  if (dragIsOverRow(ev)) return
-  dropTarget.value = null
-  if (ev.dataTransfer) {
-    ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
-  }
-}
-
-async function onBackgroundDrop(ev: DragEvent) {
-  if (dragIsOverRow(ev)) return
-  const paths = [...selection.value]
-  if (paths.length === 0) return
-  await transfer(paths, currentFolder.value, (ev.ctrlKey || ev.metaKey) ? 'copy' : 'cut')
-}
-
-async function onRowDrop(e: { path: string; folder: boolean }, ev: DragEvent) {
-  const target = e.folder ? e.path : parentOf(e.path)
-  dropTarget.value = null
-  const paths = [...selection.value]
-  if (paths.length === 0) return
-  const copy = ev.ctrlKey || ev.metaKey
-  await transfer(paths, target, copy ? 'copy' : 'cut')
-}
-
-// ---- move / copy / paste ---------------------------------------------------
-
-/** Move or copy each path into [target]; the server de-duplicates copies. */
-async function transfer(paths: string[], target: string, mode: 'copy' | 'cut') {
-  if (!details.project || details.busy) return
-  details.busy = true
-  details.error = ''
-  const failures: string[] = []
-  for (const path of paths) {
-    // Dropping something into the folder that already holds it is a no-op.
-    if (mode === 'cut' && parentOf(path) === target) continue
-    try {
-      if (mode === 'copy') {
-        await projectApi.copyEntry(details.project, path, target)
-      } else {
-        await projectApi.moveEntry(details.project, path, target)
-      }
-    } catch (err: any) {
-      failures.push(`${path.split('/').pop()}: ${err?.response?.data?.error || err?.message || 'failed'}`)
-    }
-  }
-  details.busy = false
-  if (failures.length) details.error = failures.join('\n')
-  setSelection([])
-  await loadTree()
-}
-
-function openEntryMenu(e: { path: string }, ev: MouseEvent) {
-  if (!selection.value.has(e.path)) setSelection([e.path])
-  entryMenu.show = true
-  entryMenu.path = e.path
-  entryMenu.x = ev.clientX
-  entryMenu.y = ev.clientY
-}
-
-function openBackgroundMenu(ev: MouseEvent) {
-  entryMenu.show = true
-  entryMenu.path = ''
-  entryMenu.x = ev.clientX
-  entryMenu.y = ev.clientY
-}
-
-/** Folder the menu acts on: the clicked folder, or the parent of a file. */
-function menuTargetFolder(): string {
-  if (!entryMenu.path) return currentFolder.value
-  const entry = details.entries.find(x => x.path === entryMenu.path)
-  return entry?.folder ? entry.path : parentOf(entryMenu.path)
-}
-
-function menuRename() {
-  const entry = details.entries.find(x => x.path === entryMenu.path)
-  entryMenu.show = false
-  if (entry) startRename(entry)
-}
-
-function menuCopy() {
-  clipboard.value = { mode: 'copy', paths: [...selection.value] }
-  entryMenu.show = false
-}
-
-function menuCut() {
-  clipboard.value = { mode: 'cut', paths: [...selection.value] }
-  entryMenu.show = false
-}
-
-async function menuPaste() {
-  const target = menuTargetFolder()
-  const payload = clipboard.value
-  entryMenu.show = false
-  if (!payload) return
-  await transfer(payload.paths, target, payload.mode)
-  if (payload.mode === 'cut') clipboard.value = null
-}
-
-/** Paste one level up, so a subfolder's contents can go back without leaving it. */
-async function menuPasteToParent() {
-  const payload = clipboard.value
-  entryMenu.show = false
-  if (!payload) return
-  await transfer(payload.paths, parentOf(currentFolder.value), payload.mode)
-  if (payload.mode === 'cut') clipboard.value = null
-}
-
-async function menuDelete() {
-  const paths = [...selection.value]
-  entryMenu.show = false
-  if (!paths.length) return
-  for (const path of paths) {
-    const entry = details.entries.find(x => x.path === path)
-    if (entry) await deleteEntry(entry)
-  }
-  setSelection([])
-}
-
-async function menuNewFolder() {
-  const target = menuTargetFolder()
-  entryMenu.show = false
-  const name = window.prompt('New folder name')
-  if (!name?.trim()) return
-  details.busy = true
-  try {
-    await projectApi.createFolder(details.project!, target, name.trim())
-    await loadTree()
-  } catch (e: any) {
-    details.error = e?.response?.data?.error || e?.message || 'Could not create the folder.'
-  } finally {
-    details.busy = false
-  }
-}
-
-/** Ctrl/Cmd+C, X, V and Delete act on the selection while Details is open. */
-function onDetailsKeydown(ev: KeyboardEvent) {
-  if (!details.open || !(ev.ctrlKey || ev.metaKey)) return
-  const target = document.activeElement as HTMLElement | null
-  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-  const key = ev.key.toLowerCase()
-  if (key === 'c' && selection.value.size) {
-    clipboard.value = { mode: 'copy', paths: [...selection.value] }
-    ev.preventDefault()
-  } else if (key === 'x' && selection.value.size) {
-    clipboard.value = { mode: 'cut', paths: [...selection.value] }
-    ev.preventDefault()
-  } else if (key === 'v' && clipboard.value) {
-    void transfer(clipboard.value.paths, currentFolder.value, clipboard.value.mode)
-    if (clipboard.value.mode === 'cut') clipboard.value = null
-    ev.preventDefault()
-  }
-}
 
 async function fetchProjects() {
   loading.value = true
@@ -891,22 +452,40 @@ async function confirmDelete() {
   }
 }
 
-function onGlobalMouseDown(ev: MouseEvent) {
-  // Any click outside the entry menu dismisses it.
-  const el = ev.target as HTMLElement | null
-  if (entryMenu.show && el && !el.closest('.ctx-menu')) entryMenu.show = false
+onMounted(() => { void fetchProjects() })
+
+// Leaving the page closes every detail window: they belong to this view.
+onBeforeRouteLeave(() => { closeAllWindows() })
+onUnmounted(() => { closeAllWindows() })
+
+// ---------------------------------------------------------------
+// Details windows: floating, non-modal, several at once
+// ---------------------------------------------------------------
+interface DetailsWindow { id: number; project: string; x: number; y: number }
+
+const detailWindows = ref<DetailsWindow[]>([])
+let nextWindowId = 1
+
+/** Open a window for the selected project; re-focus it if already open. */
+function openDetails() {
+  const [name] = [...selected.value]
+  if (!name) return
+  const existing = detailWindows.value.find(w => w.project === name)
+  if (existing) return
+  const index = detailWindows.value.length
+  detailWindows.value = [
+    ...detailWindows.value,
+    { id: nextWindowId++, project: name, x: 90 + index * 28, y: 90 + index * 28 },
+  ]
 }
 
-onMounted(() => {
-  void fetchProjects()
-  window.addEventListener('keydown', onDetailsKeydown)
-  window.addEventListener('mousedown', onGlobalMouseDown)
-})
+function closeWindow(id: number) {
+  detailWindows.value = detailWindows.value.filter(w => w.id !== id)
+}
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', onDetailsKeydown)
-  window.removeEventListener('mousedown', onGlobalMouseDown)
-})
+function closeAllWindows() {
+  detailWindows.value = []
+}
 // ---------------------------------------------------------------
 // Selection + the Ghidra-style project browser
 // ---------------------------------------------------------------
@@ -956,27 +535,9 @@ async function deleteSelected() {
   }
 }
 
-interface TreeEntry { path: string; name: string; folder: boolean; size: number }
 
-const details = reactive({
-  open: false,
-  project: '',
-  entries: [] as TreeEntry[],
-  folders: 0,
-  files: 0,
-  newFolder: '',
-  selectedFolder: '',
-  loading: false,
-  busy: false,
-  importing: false,
-  stale: false,
-  error: null as string | null,
-})
 
 /** Lock holder of the project open in the details dialog, if any. */
-const detailsLock = computed(() =>
-  projects.value.find(p => p.name === details.project)?.locked ?? null
-)
 
 /** Tooltip for the "in use" badge in the list. */
 function lockTitle(holder: { sessionId?: string | null; pid?: number; acquiredAt?: string | null }) {
@@ -985,148 +546,37 @@ function lockTitle(holder: { sessionId?: string | null; pid?: number; acquiredAt
   return `held by ${session}${since} (pid ${holder.pid ?? '?'})`
 }
 
-// Renaming happens in place: the row turns into an input and the failure, if
-// any, is reported under that same row instead of in a notification bar.
-const editingPath = ref<string | null>(null)
-const editValue = ref('')
-const rowError = ref<{ path: string; message: string } | null>(null)
-const renameInput = ref<HTMLInputElement[] | null>(null)
+// ---------------------------------------------------------------
+// New project: name only, the folder is created empty
+// ---------------------------------------------------------------
+const createModal = reactive({ open: false, name: '', busy: false, error: '' })
 
-function formatSize(bytes: number): string {
-  if (!bytes) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+function openCreateProject() {
+  createModal.open = true
+  createModal.name = ''
+  createModal.error = ''
 }
 
-async function openDetails() {
-  const name = [...selected.value][0]
-  if (!name) return
-  details.open = true
-  details.project = name
-  details.newFolder = ''
-  details.selectedFolder = ''
-  importBinaryId.value = null
-  importFolder.value = ''
-  await Promise.all([loadTree(), loadBinaries()])
-}
-
-function closeDetails() {
-  details.open = false
-}
-
-/** Available binaries of the selected instance, for the import control. */
-async function loadBinaries() {
-  binariesLoading.value = true
+async function submitCreateProject() {
+  const name = createModal.name.trim()
+  if (!name || createModal.busy) return
+  createModal.busy = true
+  createModal.error = ''
   try {
-    const res = await fileApi.list(0, 500)
-    binaries.value = res.data.files ?? []
+    await projectApi.create(name)
+    createModal.open = false
+    await fetchProjects()
+    // Open the new project straight away: it is empty, which is confusing
+    // unless you can see it.
+    selected.value = new Set([name])
+    openDetails()
   } catch (e: any) {
-    binaries.value = []
-    details.error = e?.response?.data?.error || 'Failed to load binaries'
+    createModal.error = e?.response?.data?.error || e?.message || 'Could not create the project.'
   } finally {
-    binariesLoading.value = false
+    createModal.busy = false
   }
 }
 
-/** Point the import control at a folder when its tree row is clicked. */
-async function importBinary() {
-  if (importBinaryId.value === null) return
-  details.importing = true
-  details.error = null
-  try {
-    await projectApi.importBinary(details.project, {
-      binaryId: String(importBinaryId.value),
-      folder: importFolder.value.trim(),
-    })
-    await loadTree()
-  } catch (e: any) {
-    details.error = e?.response?.data?.error || String(e)
-  } finally {
-    details.importing = false
-  }
-}
-
-/** Reset to the root whenever a different project is opened. */
-async function loadTree() {
-  const known = new Set(details.entries.map(e => e.path))
-  if (currentFolder.value && !known.has(currentFolder.value)) currentFolder.value = ''
-  details.loading = true
-  details.error = null
-  try {
-    const res = await projectApi.tree(details.project)
-    details.entries = res.data.entries
-    details.stale = res.data.stale === true
-    details.folders = details.entries.filter(e => e.folder).length
-    details.files = details.entries.length - details.folders
-  } catch (e: any) {
-    details.error = e?.response?.data?.error || String(e)
-  } finally {
-    details.loading = false
-  }
-}
-
-async function createFolder() {
-  const name = details.newFolder.trim()
-  if (!name) return
-  details.busy = true
-  try {
-    await projectApi.createFolder(details.project, currentFolder.value, name)
-    details.newFolder = ''
-    await loadTree()
-  } catch (e: any) {
-    details.error = e?.response?.data?.error || String(e)
-  } finally {
-    details.busy = false
-  }
-}
-
-function startRename(e: TreeEntry) {
-  detailError(null)
-  rowError.value = null
-  editingPath.value = e.path
-  editValue.value = e.name
-  nextTick(() => renameInput.value?.[0]?.focus())
-}
-
-function cancelRename() {
-  editingPath.value = null
-  editValue.value = ''
-}
-
-async function commitRename(e: TreeEntry) {
-  if (editingPath.value !== e.path) return
-  const to = editValue.value.trim()
-  if (!to || to === e.name) { cancelRename(); return }
-  details.busy = true
-  try {
-    await projectApi.renameEntry(details.project, e.path, to)
-    cancelRename()
-    rowError.value = null
-    await loadTree()
-  } catch (err: any) {
-    const message = err?.response?.data?.error || String(err)
-    rowError.value = { path: e.path, message }
-    // Stay in edit mode so the name can be fixed where it was typed.
-    nextTick(() => renameInput.value?.[0]?.focus())
-  } finally {
-    details.busy = false
-  }
-}
-
-function detailError(message: string | null) {
-  details.error = message
-}
-
-async function deleteEntry(e: TreeEntry) {
-  if (!confirm(`Delete '${e.path}' from this project? This cannot be undone.`)) return
-  try {
-    await projectApi.deleteEntry(details.project, e.path)
-    await loadTree()
-  } catch (err: any) {
-    details.error = err?.response?.data?.error || String(err)
-  }
-}
 </script>
 
 <style scoped>
