@@ -113,6 +113,13 @@
         ↩ Paste into parent ({{ parentOf(currentFolder) || 'root' }})
       </div>
       <div v-if="menu.path" class="pdw-menu-item danger" @click="menuDelete">🗑 Delete</div>
+      <!-- Identity of the clicked program: click to copy, so it can be checked
+           against the database or handed to a tool. -->
+      <div v-if="menuEntry && !menuEntry.folder" class="pdw-menu-uuid" @click="copyProgramId">
+        <span class="pdw-menu-uuid-label">UUID</span>
+        <span v-if="menuEntry.programId" class="pdw-menu-uuid-value">{{ menuEntry.programId }}</span>
+        <span v-else class="pdw-menu-uuid-missing">not assigned yet — click to retry</span>
+      </div>
     </div>
   </div>
 </template>
@@ -133,7 +140,13 @@ export const detailsClipboard = ref<{ mode: 'copy' | 'cut'; project: string; pat
 import { reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { projectApi, fileApi } from '@/services/api'
 
-interface TreeEntry { path: string; name: string; folder: boolean; size: number }
+interface TreeEntry {
+  path: string
+  name: string
+  folder: boolean
+  size: number
+  programId?: string | null
+}
 
 const props = defineProps<{ project: string; startX: number; startY: number }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -154,6 +167,8 @@ const clipboard = detailsClipboard
 const dropTarget = ref<string | null>(null)
 const marquee = reactive({ active: false, x0: 0, y0: 0, x1: 0, y1: 0 })
 const menu = reactive({ show: false, x: 0, y: 0, path: '' })
+/** The entry the context menu is acting on. */
+const menuEntry = computed(() => entries.value.find(e => e.path === menu.path) ?? null)
 const newFolder = ref('')
 const editingPath = ref<string | null>(null)
 const editValue = ref('')
@@ -540,6 +555,28 @@ function menuCut() {
   menu.show = false
 }
 
+/** Copy the program's UUID, refreshing the tree when it is not known yet. */
+async function copyProgramId() {
+  const entry = menuEntry.value
+  if (!entry) return
+  const id = entry.programId
+  if (!id) {
+    menu.show = false
+    await loadTree()
+    notice.value = 'No UUID recorded yet for this program — it is assigned the first time it is opened.'
+    window.setTimeout(() => { notice.value = null }, 6000)
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(id)
+    notice.value = `Copied program UUID ${id}`
+  } catch {
+    notice.value = `Program UUID: ${id}`
+  }
+  menu.show = false
+  window.setTimeout(() => { notice.value = null }, 6000)
+}
+
 async function menuPaste() {
   const payload = clipboard.value
   const target = menuTargetFolder()
@@ -865,6 +902,33 @@ onUnmounted(() => {
 
 .pdw-menu-item:hover { background: rgba(74, 125, 255, 0.1); }
 .pdw-menu-item.danger { color: #c0392b; }
+
+.pdw-menu-uuid {
+  margin-top: 4px;
+  padding: 6px 12px;
+  border-top: 1px solid #eceef1;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.pdw-menu-uuid:hover {
+  background: rgba(74, 125, 255, 0.1);
+}
+
+.pdw-menu-uuid-label {
+  margin-right: 6px;
+  letter-spacing: 0.04em;
+  color: #9aa0a8;
+}
+
+.pdw-menu-uuid-value {
+  font-family: ui-monospace, monospace;
+  color: #4a7dff;
+}
+
+.pdw-menu-uuid-missing {
+  color: #b6bcc5;
+}
 
 .pdw-menu-hint {
   margin-left: 6px;

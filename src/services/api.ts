@@ -424,7 +424,10 @@ export const projectApi = {
   create: (name: string) =>
     api.post<{ name: string }>('/projects', { name }),
   tree: (projectName: string) =>
-    api.get<{ entries: { path: string; name: string; folder: boolean; size: number }[]; stale: boolean }>(
+    api.get<{
+      entries: { path: string; name: string; folder: boolean; size: number; programId?: string | null }[]
+      stale: boolean
+    }>(
       `/projects/${encodeURIComponent(projectName)}/tree`),
   createFolder: (projectName: string, parentPath: string, name: string) =>
     api.post<{ status: string }>(`/projects/${encodeURIComponent(projectName)}/folders`, { path: parentPath, name }),
