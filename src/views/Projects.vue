@@ -279,7 +279,7 @@
               @dragleave="onRowDragLeave(e)"
               @drop.prevent="onRowDrop(e, $event)"
             >
-              <span class="tree-icon">{{ e.folder ? '📁' : '📦' }}</span>
+              <span class="tree-icon">{{ e.folder ? (dropTarget === e.path ? '📂' : '📁') : '📦' }}</span>
 
               <input
                 v-if="editingPath === e.path"
@@ -1578,6 +1578,15 @@ async function deleteEntry(e: TreeEntry) {
 
 .tree-row-selected {
   background: rgba(74, 125, 255, 0.14);
+}
+
+.tree-row-drop .tree-icon {
+  transform: scale(1.2);
+}
+
+.tree-icon {
+  display: inline-block;
+  transition: transform 0.12s ease;
 }
 
 .tree-row-drop {
