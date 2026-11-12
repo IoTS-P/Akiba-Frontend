@@ -415,6 +415,15 @@ export const projectApi = {
       path, targetFolder, newName,
     }),
   /** Copy an entry (folder copies recursively) into another folder. */
+  /** Move or copy an entry from another project into this one. */
+  transferEntry: (
+    targetProject: string,
+    body: { fromProject: string; path: string; targetFolder: string; move: boolean },
+  ) =>
+    api.post<{ status: string; path: string }>(
+      `/projects/${encodeURIComponent(targetProject)}/entries/transfer`,
+      body,
+    ),
   copyEntry: (projectName: string, path: string, targetFolder: string) =>
     api.post<{ status: string; path: string }>(`/projects/${encodeURIComponent(projectName)}/entries/copy`, {
       path, targetFolder,

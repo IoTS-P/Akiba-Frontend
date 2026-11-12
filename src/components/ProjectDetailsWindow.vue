@@ -134,7 +134,7 @@ const lockInfo = ref<{ sessionId?: string } | null>(null)
 const locked = computed(() => !!lockInfo.value)
 const currentFolder = ref('')
 const selection = ref<Set<string>>(new Set())
-const clipboard = ref<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null)
+const clipboard = ref<{ mode: 'copy' | 'cut'; project: string; paths: string[] } | null>(null)
 const dropTarget = ref<string | null>(null)
 const marquee = reactive({ active: false, x0: 0, y0: 0, x1: 0, y1: 0 })
 const menu = reactive({ show: false, x: 0, y: 0, path: '' })
@@ -343,6 +343,11 @@ function startMarquee(ev: MouseEvent) {
 function onRowDragStart(e: TreeEntry, ev: DragEvent) {
   if (!selection.value.has(e.path)) selection.value = new Set([e.path])
   ev.dataTransfer?.setData('text/plain', [...selection.value].join('\n'))
+  // The project travels with the drag so another window knows the source.
+  ev.dataTransfer?.setData(
+    'application/x-akiba-entries',
+    JSON.stringify({ project: props.project, paths: [...selection.value] }),
+  )
   if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copyMove'
 }
 
@@ -361,14 +366,66 @@ function onBackgroundDragOver(ev: DragEvent) {
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move'
 }
 
+/** Payload of a drag that started in another details window. */
+function readDragPayload(ev: DragEvent): { project: string; paths: string[] } | null {
+  const raw = ev.dataTransfer?.getData('application/x-akiba-entries')
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { project?: string; paths?: string[] }
+    if (parsed?.project && Array.isArray(parsed.paths) && parsed.paths.length) {
+      return { project: parsed.project, paths: parsed.paths }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/** Move (default) or copy entries that belong to a different project. */
+async function transferAcrossProjects(payload: { project: string; paths: string[] }, target: string, copy: boolean) {
+  if (busy.value) return
+  busy.value = true
+  error.value = null
+  const failures: string[] = []
+  for (const path of payload.paths) {
+    try {
+      await projectApi.transferEntry(props.project, {
+        fromProject: payload.project,
+        path,
+        targetFolder: target,
+        move: !copy,
+      })
+    } catch (e: any) {
+      failures.push(`${path.split('/').pop()}: ${e?.response?.data?.error || e?.message || 'failed'}`)
+    }
+  }
+  busy.value = false
+  if (failures.length) error.value = failures.join('\n')
+  clearSelection()
+  // The source window shows the moved entries until it refreshes too.
+  window.dispatchEvent(new CustomEvent('akiba:details-refresh'))
+  await loadTree()
+}
+
 async function onRowDrop(e: TreeEntry, ev: DragEvent) {
   const target = e.folder ? e.path : parentOf(e.path)
   dropTarget.value = null
+  const payload = readDragPayload(ev)
+  if (payload && payload.project !== props.project) {
+    // Cross-project drags move by default; Ctrl copies.
+    await transferAcrossProjects(payload, target, ev.ctrlKey || ev.metaKey)
+    return
+  }
   await transfer([...selection.value], target, (ev.ctrlKey || ev.metaKey) ? 'copy' : 'cut')
 }
 
 async function onBackgroundDrop(ev: DragEvent) {
   if (dragOverRow(ev)) return
+  const payload = readDragPayload(ev)
+  if (payload && payload.project !== props.project) {
+    await transferAcrossProjects(payload, currentFolder.value, ev.ctrlKey || ev.metaKey)
+    return
+  }
   await transfer([...selection.value], currentFolder.value, (ev.ctrlKey || ev.metaKey) ? 'copy' : 'cut')
 }
 
@@ -422,12 +479,12 @@ function menuRename() {
 }
 
 function menuCopy() {
-  clipboard.value = { mode: 'copy', paths: [...selection.value] }
+  clipboard.value = { mode: 'copy', project: props.project, paths: [...selection.value] }
   menu.show = false
 }
 
 function menuCut() {
-  clipboard.value = { mode: 'cut', paths: [...selection.value] }
+  clipboard.value = { mode: 'cut', project: props.project, paths: [...selection.value] }
   menu.show = false
 }
 
@@ -436,7 +493,16 @@ async function menuPaste() {
   const target = menuTargetFolder()
   menu.show = false
   if (!payload) return
-  await transfer(payload.paths, target, payload.mode)
+  await pasteInto(payload, target)
+}
+
+/** Paste honours where the entries came from, not just this project. */
+async function pasteInto(payload: { mode: 'copy' | 'cut'; project: string; paths: string[] }, target: string) {
+  if (payload.project !== props.project) {
+    await transferAcrossProjects({ project: payload.project, paths: payload.paths }, target, payload.mode === 'copy')
+  } else {
+    await transfer(payload.paths, target, payload.mode)
+  }
   if (payload.mode === 'cut') clipboard.value = null
 }
 
@@ -444,8 +510,7 @@ async function menuPasteToParent() {
   const payload = clipboard.value
   menu.show = false
   if (!payload) return
-  await transfer(payload.paths, parentOf(currentFolder.value), payload.mode)
-  if (payload.mode === 'cut') clipboard.value = null
+  await pasteInto(payload, parentOf(currentFolder.value))
 }
 
 function menuNewFolder() {
@@ -509,14 +574,14 @@ function onKeydown(ev: KeyboardEvent) {
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
   const key = ev.key.toLowerCase()
   if (key === 'c' && selection.value.size) {
-    clipboard.value = { mode: 'copy', paths: [...selection.value] }
+    clipboard.value = { mode: 'copy', project: props.project, paths: [...selection.value] }
     ev.preventDefault()
   } else if (key === 'x' && selection.value.size) {
-    clipboard.value = { mode: 'cut', paths: [...selection.value] }
+    clipboard.value = { mode: 'cut', project: props.project, paths: [...selection.value] }
     ev.preventDefault()
   } else if (key === 'v' && clipboard.value) {
-    void transfer(clipboard.value.paths, currentFolder.value, clipboard.value.mode)
-    if (clipboard.value.mode === 'cut') clipboard.value = null
+    const payload = clipboard.value
+    void pasteInto(payload, currentFolder.value)
     ev.preventDefault()
   }
 }
@@ -526,14 +591,20 @@ function onGlobalMouseDown(ev: MouseEvent) {
   if (menu.show && el && !el.closest('.pdw-menu')) menu.show = false
 }
 
+function onPeerRefresh() {
+  void loadTree()
+}
+
 onMounted(() => {
   void loadTree()
   void loadBinaries()
+  window.addEventListener('akiba:details-refresh', onPeerRefresh)
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('mousedown', onGlobalMouseDown)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('akiba:details-refresh', onPeerRefresh)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('mousedown', onGlobalMouseDown)
   window.removeEventListener('mousemove', onDragMove)
