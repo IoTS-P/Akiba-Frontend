@@ -243,7 +243,12 @@
           </nav>
           <span class="fb-hint">Drop on empty space to put items here</span>
         </div>
-        <div class="tree-wrap">
+        <div
+          class="tree-wrap"
+          @contextmenu.prevent="openBackgroundMenu"
+          @dragover.prevent="onBackgroundDragOver"
+          @drop.prevent="onBackgroundDrop"
+        >
           <!-- Marquee selection: drawn while dragging on empty space. -->
           <div
             v-if="marquee.active"
@@ -253,9 +258,6 @@
           <ul
             class="tree"
             @mousedown.self="startMarquee"
-            @contextmenu.prevent.self="openBackgroundMenu"
-            @dragover.prevent="onBackgroundDragOver"
-            @drop.prevent="onBackgroundDrop"
           >
             <li
               v-for="e in visibleEntries"
@@ -323,6 +325,11 @@
             class="ctx-menu-item"
             @click="menuPaste"
           >📋 Paste {{ clipboard.mode === 'cut' ? '(move)' : '(copy)' }}</div>
+          <div
+            v-if="clipboard && !entryMenu.path && currentFolder"
+            class="ctx-menu-item"
+            @click="menuPasteToParent"
+          >↩ Paste into parent ({{ parentOf(currentFolder) || 'project root' }})</div>
           <div v-if="entryMenu.path" class="ctx-menu-sep"></div>
           <div v-if="entryMenu.path" class="ctx-menu-item danger" @click="menuDelete">🗑 Delete</div>
         </div>
@@ -691,6 +698,15 @@ async function menuPaste() {
   entryMenu.show = false
   if (!payload) return
   await transfer(payload.paths, target, payload.mode)
+  if (payload.mode === 'cut') clipboard.value = null
+}
+
+/** Paste one level up, so a subfolder's contents can go back without leaving it. */
+async function menuPasteToParent() {
+  const payload = clipboard.value
+  entryMenu.show = false
+  if (!payload) return
+  await transfer(payload.paths, parentOf(currentFolder.value), payload.mode)
   if (payload.mode === 'cut') clipboard.value = null
 }
 
@@ -1549,7 +1565,7 @@ async function deleteEntry(e: TreeEntry) {
 
 .tree-wrap {
   position: relative;
-  min-height: 220px;
+  min-height: 260px;
 }
 
 .marquee-box {
