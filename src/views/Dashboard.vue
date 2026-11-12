@@ -16,17 +16,17 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon">⚙️</div>
+        <div class="stat-icon">📁</div>
         <div class="stat-content">
-          <div class="stat-value">{{ stats.workflows }}</div>
-          <div class="stat-label">Workflows</div>
+          <div class="stat-value">{{ stats.projects }}</div>
+          <div class="stat-label">Projects</div>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon">✅</div>
         <div class="stat-content">
-          <div class="stat-value">{{ stats.running }}</div>
-          <div class="stat-label">Running</div>
+          <div class="stat-value">{{ stats.conversations }}</div>
+          <div class="stat-label">Conversations</div>
         </div>
       </div>
     </div>
@@ -91,37 +91,24 @@
           </div>
         </div>
       </div>
-      <div class="section">
-        <h2>Running Workflows</h2>
-        <div v-if="runningWorkflows.length === 0" class="empty">No running workflows</div>
-        <div v-else class="list">
-          <div v-for="wf in runningWorkflows" :key="wf.id" class="list-item">
-            <span class="name">{{ wf.id.slice(0, 8) }}...</span>
-            <div class="progress-bar">
-              <div class="progress" :style="{ width: wf.progress * 100 + '%' }"></div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { instanceApi, scriptApi, systemApi, workflowApi } from '@/services/api'
+import { agentApi, instanceApi, projectApi, scriptApi, systemApi } from '@/services/api'
 import type { SystemMetrics } from '@/services/api'
-import type { Script, WorkflowStatus } from '@/types'
+import type { Script } from '@/types'
 
-const stats = ref({ instances: 0, scripts: 0, workflows: 0, running: 0 })
+const stats = ref({ instances: 0, scripts: 0, projects: 0, conversations: 0 })
 const recentScripts = ref<Script[]>([])
-const runningWorkflows = ref<WorkflowStatus[]>([])
 
 const metrics = ref<SystemMetrics | null>(null)
 let metricsTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
-  await Promise.all([loadStats(), loadRecentScripts(), loadRunningWorkflows(), loadMetrics()])
+  await Promise.all([loadStats(), loadRecentScripts(), loadMetrics()])
   // Two seconds keeps the bars alive without hammering /proc.
   metricsTimer = setInterval(loadMetrics, 2000)
 })
@@ -160,17 +147,17 @@ function bytes(value: number | undefined): string {
 
 async function loadStats() {
   try {
-    const [instances, scripts, workflows, running] = await Promise.all([
+    const [instances, scripts, projects, sessions] = await Promise.all([
       instanceApi.list(),
       scriptApi.list(),
-      workflowApi.history(),
-      workflowApi.running()
+      projectApi.list(),
+      agentApi.listSessions(),
     ])
     stats.value = {
       instances: (instances.data.instances || []).length,
       scripts: (scripts.data.scripts || []).length,
-      workflows: (workflows.data.workflows || []).length,
-      running: (running.data.workflows || []).length
+      projects: (projects.data.projects || []).length,
+      conversations: (sessions.data.sessions || []).length,
     }
   } catch (e) {
     console.error('Failed to load stats:', e)
@@ -186,14 +173,6 @@ async function loadRecentScripts() {
   }
 }
 
-async function loadRunningWorkflows() {
-  try {
-    const response = await workflowApi.running()
-    runningWorkflows.value = response.data.workflows || []
-  } catch (e) {
-    console.error('Failed to load workflows:', e)
-  }
-}
 </script>
 
 <style scoped>

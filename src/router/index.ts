@@ -43,11 +43,6 @@ const router = createRouter({
           component: () => import('@/views/Agent.vue')
         },
         {
-          path: 'workflows',
-          name: 'workflows',
-          component: () => import('@/views/Workflows.vue')
-        },
-        {
           path: 'files',
           name: 'files',
           component: () => import('@/views/Files.vue')

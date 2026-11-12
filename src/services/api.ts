@@ -8,7 +8,6 @@ import type {
   Script,
   ScriptExecution,
   ScriptRunResponse,
-  WorkflowStatus,
   QueryResponse,
   AgentSession,
   AgentMessage,
@@ -350,20 +349,6 @@ export const agentApi = {
     ),
 }
 
-export const workflowApi = {
-  projects: () => api.get<{ projects: string[] }>('/workflow/projects'),
-  start: (instanceName: string, configPath?: string, threads?: number) =>
-    api.post<{ workflowId: string; message: string }>('/workflow/start', {
-      instanceName,
-      configPath,
-      threads
-    }),
-  stop: (workflowId: string) =>
-    api.post<{ workflowId: string; message: string }>(`/workflow/stop/${workflowId}`),
-  status: (workflowId: string) => api.get<WorkflowStatus>(`/workflow/status/${workflowId}`),
-  running: () => api.get<{ workflows: WorkflowStatus[] }>('/workflow/running'),
-  history: () => api.get<{ workflows: WorkflowStatus[] }>('/workflow/history')
-}
 
 export interface FileEntry {
   id: number

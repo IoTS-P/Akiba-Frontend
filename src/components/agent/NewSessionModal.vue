@@ -153,7 +153,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { agentApi, fileApi, projectApi, workflowApi } from '@/services/api'
+import { agentApi, fileApi, projectApi } from '@/services/api'
 import type { AgentSession } from '@/types'
 import type { FileSearchResult } from '@/services/api'
 
@@ -269,8 +269,9 @@ function selectFile(file: FileSearchResult) {
 
 async function loadGhidraProjects() {
   try {
-    const { data } = await workflowApi.projects()
-    ghidraProjects.value = data.projects || []
+    // The workflow endpoints are gone; the project list is the real source.
+    const { data } = await projectApi.list()
+    ghidraProjects.value = (data.projects || []).map(p => p.name)
     if (projectMode.value === 'existing') {
       selectedProjectName.value = ghidraProjects.value[0] || ''
     }
