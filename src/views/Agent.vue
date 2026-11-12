@@ -187,14 +187,17 @@
               class="program-picker"
               :title="`Program inside project '${activeSessionMeta.projectName}'`"
             >
-              <span class="program-picker-label">Program</span>
+              <span
+                class="program-picker-label"
+                :class="{ 'program-picker-missing': !activeSessionMeta.currentProgram }"
+              >Program</span>
               <select
                 class="program-picker-select"
                 :value="activeSessionMeta.currentProgram ?? ''"
                 :disabled="programBusy"
                 @change="onProgramChange"
               >
-                <option value="">(first program)</option>
+                <option value="" disabled>— select a program —</option>
                 <option v-for="p in projectPrograms" :key="p" :value="p">{{ p }}</option>
               </select>
             </div>
@@ -4892,6 +4895,11 @@ watch(
   letter-spacing: 0.02em;
   color: #8a8f98;
   text-transform: uppercase;
+}
+
+.program-picker-missing {
+  color: #c0392b;
+  font-weight: 600;
 }
 
 .program-picker-select {
