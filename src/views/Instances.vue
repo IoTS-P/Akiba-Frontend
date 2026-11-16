@@ -2,8 +2,15 @@
   <div class="instances">
     <div class="actions">
       <div class="input-group">
-        <input v-model="newInstanceName" placeholder="Instance name" @keyup.enter="createInstance" />
-        <button @click="createInstance" :disabled="creating || !newInstanceName">
+        <input
+          v-model="newInstanceName"
+          placeholder="Instance name"
+          maxlength="48"
+          spellcheck="false"
+          @input="sanitizeName"
+          @keyup.enter="createInstance"
+        />
+        <button @click="createInstance" :disabled="creating || !isNameValid">
           {{ creating ? 'Creating…' : 'Create' }}
         </button>
       </div>
@@ -139,11 +146,12 @@
         </div>
       </div>
     </div>
+    <p v-if="nameHint" class="field-hint">{{ nameHint }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { instanceApi } from '@/services/api'
 import { useInstanceStore } from '@/stores/instance'
@@ -153,6 +161,21 @@ const router = useRouter()
 const store = useInstanceStore()
 
 const newInstanceName = ref('')
+
+// The daemon creates a PostgreSQL database per instance, so a name has to be usable as
+// one: letters, digits and underscore, up to 48 characters. Filtering here means the
+// server never has to reject a name the UI happily offered.
+const INSTANCE_NAME = /^[A-Za-z0-9_]{1,48}$/
+const isNameValid = computed(() => INSTANCE_NAME.test(newInstanceName.value.trim()))
+const nameHint = computed(() =>
+  newInstanceName.value && !isNameValid.value
+    ? 'Use 1-48 characters: letters, digits or underscore.'
+    : ''
+)
+
+function sanitizeName() {
+  newInstanceName.value = newInstanceName.value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 48)
+}
 const creating = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
@@ -188,6 +211,10 @@ function formatTime(value?: string) {
 async function createInstance() {
   if (!newInstanceName.value) return
   const name = newInstanceName.value.trim()
+  if (!INSTANCE_NAME.test(name)) {
+    showMessage('Use 1-48 characters: letters, digits or underscore.', 'error')
+    return
+  }
   creating.value = true
   try {
     await instanceApi.create(name)
@@ -525,4 +552,6 @@ async function deleteInstance(name: string) {
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .error { color: #d32f2f; font-size: 13px; margin-top: 8px; }
+
+.field-hint { color: #b26a00; font-size: 12px; margin: 6px 0 0; }
 </style>
