@@ -2802,6 +2802,11 @@ function finishStreaming(error?: string | null) {
     streamingText.value = targetText
     renderStreamingNow()
     streamInterruptedError.value = error
+    // A turn that ended badly still ends: the tool that was running will never send its
+    // end event, and its card must not sit there counting.
+    liveTools.value = []
+    stoppingTools.value = new Set()
+    stopClock()
     return
   }
 
