@@ -32,25 +32,30 @@
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
       <!-- Agent lists conversations; the other activities still list their views. -->
-      <div v-if="isAgentActivity" class="sidebar-split">
+      <div v-if="isAgentActivity || isProjectsActivity" class="sidebar-split">
+        <ProjectsSidebar
+          v-if="isProjectsActivity"
+          @open-workspace="openProgramWorkspace"
+        />
         <AgentSidebar
+          v-else-if="isAgentActivity"
           :active-id="activeSessionId"
           class="split-top"
           @open="openConversation"
           @workspace="openWorkspace"
         />
         <div
-          v-if="workspaceSessionId"
+          v-if="workspaceSessionId || programScope"
           class="resizer-h"
           role="separator"
           aria-orientation="horizontal"
           @pointerdown="startSplitDrag"
         ></div>
         <WorkspacePanel
-          v-if="workspaceSessionId"
-          :scope="sessionScope"
+          v-if="workspaceSessionId || programScope"
+          :scope="programScope ?? sessionScope"
           class="split-bottom"
-          @open-file="openFileInEditor"
+          @open-file="openAnyFile"
           :style="{ flexBasis: splitPercent + '%' }"
           @close="workspaceSessionId = null"
         />
@@ -144,6 +149,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
+import ProjectsSidebar from '@/components/projects/ProjectsSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { workspaceApi, type WorkspaceScope } from '@/services/workspace'
@@ -196,6 +202,19 @@ function go(path: string) {
 
 /** The agent activity owns its own sidebar: a list of conversations. */
 const isAgentActivity = computed(() => route.path.startsWith('/agent'))
+const isProjectsActivity = computed(() => route.path.startsWith('/projects'))
+
+/** The program whose workspace is open below the project tree, if any. */
+const programScope = ref<WorkspaceScope | null>(null)
+
+function openProgramWorkspace(scope: { project: string; program: string }) {
+  programScope.value = { kind: 'program', project: scope.project, program: scope.program }
+}
+
+/** A file belongs to whichever workspace it was opened from. */
+function openAnyFile(path: string) {
+  void openInScope(programScope.value ?? sessionScope.value, path)
+}
 const activeSessionId = computed(() =>
   typeof route.query.sessionId === 'string' ? route.query.sessionId : null
 )
@@ -242,7 +261,7 @@ function startSplitDrag(e: PointerEvent) {
 
 interface FileTab {
   key: string
-  sessionId: string
+  scope: WorkspaceScope
   path: string
   title: string
   content: string
@@ -280,8 +299,8 @@ const sessionScope = computed<WorkspaceScope>(() => ({
   sessionId: workspaceSessionId.value ?? '',
 }))
 
-async function openFileInEditor(path: string) {
-  if (!workspaceSessionId.value) return
+async function openInScope(scope: WorkspaceScope | null, path: string) {
+  if (!scope || (scope.kind === 'session' && !scope.sessionId)) return
   const existing = fileTabs.value.find(t => t.path === path)
   if (existing) {
     activeKey.value = existing.key
@@ -290,15 +309,15 @@ async function openFileInEditor(path: string) {
   if (opening.has(path)) return
   opening.add(path)
   try {
-    const { data } = await workspaceApi.readFile(sessionScope.value, path)
+    const { data } = await workspaceApi.readFile(scope, path)
     // The read may have finished after another click already opened the same file.
     if (fileTabs.value.some(t => t.path === data.path)) {
       activeKey.value = fileTabs.value.find(t => t.path === data.path)!.key
       return
     }
     const tab: FileTab = {
-      key: `${workspaceSessionId.value}:${path}`,
-      sessionId: workspaceSessionId.value,
+      key: `${scope.kind}:${scope.kind === 'session' ? scope.sessionId : scope.project + scope.program}:${path}`,
+      scope,
       path: data.path,
       title: data.path.split('/').pop() || data.path,
       content: data.content,
@@ -336,7 +355,7 @@ async function saveTab(tab: FileTab) {
     saveTimers.delete(tab.key)
   }
   try {
-    await workspaceApi.writeFile({ kind: 'session', sessionId: tab.sessionId }, tab.path, tab.content)
+    await workspaceApi.writeFile(tab.scope, tab.path, tab.content)
     tab.dirty = false
   } catch {
     // Leave it marked dirty: an unsaved change must not look saved.
