@@ -39,7 +39,8 @@
         :all="all"
         :depth="depth + 1"
         @open-workspace="$emit('open-workspace', $event)"
-        @changed="$emit('changed')"
+        @error="$emit('error', $event)"
+        @changed="$emit('changed', $event)"
         @drop-import="$emit('drop-import', $event)"
       />
     </template>
@@ -68,7 +69,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'open-workspace': [scope: { project: string; program: string }]
-  changed: []
+  changed: [project?: string]
+  error: [message: string]
   'drop-import': [payload: { folder: string; event: DragEvent }]
 }>()
 
@@ -154,9 +156,9 @@ async function copyEntry(withWorkspace: boolean) {
       move: false,
       withWorkspace,
     } as any)
-    emit('changed')
-  } catch {
-    // A refused copy leaves both trees as they were.
+    emit('changed', dest.project)
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Copy failed.')
   }
 }
 
@@ -175,9 +177,9 @@ async function moveEntry() {
         move: true,
       } as any)
     }
-    emit('changed')
-  } catch {
-    // Same: nothing moved.
+    emit('changed', dest.project)
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Move failed.')
   }
 }
 
@@ -188,8 +190,8 @@ async function newFolder() {
   try {
     await projectApi.createFolder(props.project, props.entry.path, name)
     emit('changed')
-  } catch {
-    // The tree reloads only on success; a failed create leaves the list unchanged.
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Could not create the folder.')
   }
 }
 
@@ -199,8 +201,8 @@ async function remove() {
   try {
     await projectApi.deleteEntry(props.project, props.entry.path)
     emit('changed')
-  } catch {
-    // Same: nothing changes if the delete did not happen.
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Delete failed.')
   }
 }
 </script>

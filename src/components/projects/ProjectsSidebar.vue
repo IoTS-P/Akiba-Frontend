@@ -29,7 +29,8 @@
             :all="entriesByProject[p.name] ?? []"
             :depth="0"
             @open-workspace="$emit('openWorkspace', $event)"
-            @changed="reload(p.name)"
+            @changed="onChanged(p.name, $event)"
+            @error="error = $event"
             @drop-import="importInto(p.name, $event.folder, $event.event)"
           />
         </template>
@@ -111,6 +112,12 @@ async function toggleProject(name: string) {
     await reload(name)
   }
   open.value = next
+}
+
+/** A copy or a move can land in another project; both trees need to know. */
+async function onChanged(source: string, target?: string) {
+  await reload(source)
+  if (target && target !== source && entriesByProject[target]) await reload(target)
 }
 
 async function reload(name: string) {
