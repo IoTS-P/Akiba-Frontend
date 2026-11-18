@@ -4,7 +4,7 @@
       <div class="confirm-header">
         <span class="confirm-icon">⚠️</span>
         <span class="confirm-title">
-          {{ request.action === 'file_access' ? 'File Access Outside Workspace' : 'Tool Confirmation Required' }}
+          {{ title }}
         </span>
       </div>
       <div class="confirm-body">
@@ -16,7 +16,24 @@
           <span class="confirm-label">Agent:</span>
           <code>{{ agentName }}</code>
         </p>
-        <template v-if="request.action === 'file_access'">
+        <template v-if="request.action === 'long_timeout'">
+          <p class="confirm-label-text">
+            The agent wants to run <code>{{ request.toolName }}</code> for up to
+            <strong>{{ formatMinutes(request.timeout) }}</strong>. Anything over
+            {{ approvalLimitText }} has to be approved by you.
+          </p>
+          <p class="confirm-label-text">
+            <strong>Deny</strong> keeps the call from running at all — the agent is told so in
+            plain words. <strong>Approve</strong> lets it run, and you can still stop it from
+            the tool card while it works.
+          </p>
+          <div v-if="request.expiresInSeconds" class="confirm-meta">
+            <div class="confirm-expiry">
+              No answer within {{ formatMinutes(request.expiresInSeconds) }} counts as deny.
+            </div>
+          </div>
+        </template>
+        <template v-else-if="request.action === 'file_access'">
           <p class="confirm-label-text">
             The agent wants to <strong>{{ request.command.split(' ')[0] }}</strong>
             a file <strong>outside</strong> the workspace:
@@ -45,15 +62,41 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { PendingConfirmation } from '@/types'
 
-defineProps<{
+const props = defineProps<{
   request: (PendingConfirmation & { sessionId: string }) | null
   busy: boolean
   agentName?: string | null
 }>()
 
 const emit = defineEmits<{ approve: []; deny: [] }>()
+
+const title = computed(() => {
+  switch (props.request?.action) {
+    case 'file_access':
+      return 'File Access Outside Workspace'
+    case 'long_timeout':
+      return 'Long Running Tool Call'
+    default:
+      return 'Tool Confirmation Required'
+  }
+})
+
+const approvalLimitText = computed(() => {
+  const seconds = props.request?.approvalLimitSeconds
+  return seconds ? formatMinutes(seconds) : 'the configured limit'
+})
+
+/** 5400 → "1h 30m", 300 → "5 minutes". */
+function formatMinutes(seconds: number): string {
+  const total = Math.max(1, Math.round(seconds / 60))
+  if (total < 60) return `${total} minute${total === 1 ? '' : 's'}`
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
+  return rest === 0 ? `${hours} hour${hours === 1 ? '' : 's'}` : `${hours}h ${rest}m`
+}
 </script>
 
 <style scoped>
@@ -166,6 +209,10 @@ const emit = defineEmits<{ approve: []; deny: [] }>()
   font-size: 12px;
   color: var(--text-secondary, #a6adc8);
 }
+.confirm-expiry {
+  color: var(--accent-orange, #f9e2af);
+}
+
 .confirm-meta code {
   background: var(--bg-accent, #313244);
   padding: 1px 6px;

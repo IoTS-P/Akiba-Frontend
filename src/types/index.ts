@@ -188,11 +188,15 @@ export interface PendingConfirmation {
   command: string
   workingDirectory: string
   timeout: number
-  /** Action type: "shell_command" or "file_access" */
+  /** Action type: "shell_command", "file_access" or "long_timeout" */
   action?: string
   /** Target path for file_access actions (null for shell_command) */
   targetPath?: string | null
   createdAt: number
+  /** Seconds until the request counts as denied; shown so nobody waits in vain. */
+  expiresInSeconds?: number | null
+  /** The deployment's approval limit for a long call, in seconds. */
+  approvalLimitSeconds?: number | null
 }
 
 /**
