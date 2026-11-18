@@ -8,8 +8,9 @@
         <span class="title">{{ script?.name }}</span>
         <span class="saved" :class="{ dirty }">{{ dirty ? 'Saving…' : 'Saved' }}</span>
       </div>
-      <div v-if="script" class="body">
+      <div v-if="script && String(script.id) === String(activeId)" class="body">
         <WorkspaceEditor
+          :key="String(activeId)"
           ref="editorRef"
           v-model="code"
           :language="script?.language || 'kotlin'"
