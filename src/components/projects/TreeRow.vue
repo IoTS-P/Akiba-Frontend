@@ -19,6 +19,10 @@
         <div class="ctx-item" @click="openWs">Open workspace</div>
         <div class="ctx-item" @click="copyUuid">Copy program UUID</div>
         <div class="ctx-sep"></div>
+        <div class="ctx-item" @click="copyEntry(true)">Copy with workspace…</div>
+        <div class="ctx-item" @click="copyEntry(false)">Copy without workspace…</div>
+        <div class="ctx-item" @click="moveEntry">Move to…</div>
+        <div class="ctx-sep"></div>
       </template>
       <div v-else class="ctx-item" @click="newFolder">New folder inside</div>
       <div class="ctx-item" @click="copyPath">Copy path</div>
@@ -45,6 +49,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { projectApi } from '@/services/api'
+import { copyText } from '@/utils/clipboard'
 
 interface Entry {
   path: string
@@ -109,14 +114,71 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function copyUuid() {
+async function copyUuid() {
   menu.value = false
-  if (props.entry.programId) void navigator.clipboard?.writeText(props.entry.programId)
+  if (props.entry.programId) await copyText(props.entry.programId)
 }
 
-function copyPath() {
+async function copyPath() {
   menu.value = false
-  void navigator.clipboard?.writeText(`${props.project}:${props.entry.path}`)
+  await copyText(`${props.project}:${props.entry.path}`)
+}
+
+/**
+ * Where a copy or a move should go.
+ *
+ * Asking for `project:/folder` in one field keeps this to one dialog; the project may be another
+ * one, which is the whole reason copy is not limited to the current tree.
+ */
+function askDestination(verb: string): { project: string; folder: string } | null {
+  const answer = window.prompt(
+    `${verb} to (project:/folder, leave the project empty for "${props.project}")`,
+    `${props.project}:/`,
+  )
+  if (!answer) return null
+  const [projectPart, ...rest] = answer.split(':')
+  const project = projectPart.trim() || props.project
+  const folder = rest.join(':').trim()
+  return { project, folder: folder === '' ? '/' : folder }
+}
+
+async function copyEntry(withWorkspace: boolean) {
+  menu.value = false
+  const dest = askDestination('Copy')
+  if (!dest) return
+  try {
+    await projectApi.transferEntry(dest.project, {
+      fromProject: props.project,
+      path: props.entry.path,
+      targetFolder: dest.folder,
+      move: false,
+      withWorkspace,
+    } as any)
+    emit('changed')
+  } catch {
+    // A refused copy leaves both trees as they were.
+  }
+}
+
+async function moveEntry() {
+  menu.value = false
+  const dest = askDestination('Move')
+  if (!dest) return
+  try {
+    if (dest.project === props.project) {
+      await projectApi.moveEntry(props.project, props.entry.path, dest.folder)
+    } else {
+      await projectApi.transferEntry(dest.project, {
+        fromProject: props.project,
+        path: props.entry.path,
+        targetFolder: dest.folder,
+        move: true,
+      } as any)
+    }
+    emit('changed')
+  } catch {
+    // Same: nothing moved.
+  }
 }
 
 async function newFolder() {
