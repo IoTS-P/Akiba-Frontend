@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { projectApi } from '@/services/api'
 
 interface Entry {
@@ -86,6 +86,13 @@ function activate() {
   }
   emit('open-workspace', { project: props.project, program: props.entry.path })
 }
+
+function closeMenu() {
+  menu.value = false
+}
+
+onMounted(() => window.addEventListener('click', closeMenu))
+onUnmounted(() => window.removeEventListener('click', closeMenu))
 
 function openWs() {
   menu.value = false

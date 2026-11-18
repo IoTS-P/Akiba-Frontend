@@ -295,6 +295,27 @@ const sessionScope = computed<WorkspaceScope>(() => ({
   sessionId: workspaceSessionId.value ?? '',
 }))
 
+/** A tab is named by its file, and by where that file lives when the name is not enough. */
+function scopeLabel(scope: WorkspaceScope): string {
+  return scope.kind === 'session' ? 'agent' : scope.project
+}
+
+function relabelTabs() {
+  const byName = new Map<string, FileTab[]>()
+  for (const tab of fileTabs.value) {
+    const name = tab.path.split('/').pop() || tab.path
+    const group = byName.get(name) ?? []
+    group.push(tab)
+    byName.set(name, group)
+  }
+  for (const [name, group] of byName) {
+    for (const tab of group) {
+      // Two files called notes.md are different files: say where each one is.
+      tab.title = group.length === 1 ? name : `${scopeLabel(tab.scope)}: ${tab.path}`
+    }
+  }
+}
+
 async function openInScope(scope: WorkspaceScope | null, path: string) {
   if (!scope || (scope.kind === 'session' && !scope.sessionId)) return
   const existing = fileTabs.value.find(t => t.path === path)
@@ -322,6 +343,7 @@ async function openInScope(scope: WorkspaceScope | null, path: string) {
       dirty: false,
     }
     fileTabs.value.push(tab)
+    relabelTabs()
     activeKey.value = tab.key
   } catch {
     // A file that cannot be read simply does not open; the tree still shows it exists.
@@ -363,6 +385,7 @@ async function closeTab(tab: FileTab) {
   const index = fileTabs.value.findIndex(t => t.key === tab.key)
   if (index === -1) return
   fileTabs.value.splice(index, 1)
+  relabelTabs()
   if (activeKey.value === tab.key) {
     activeKey.value = fileTabs.value[Math.min(index, fileTabs.value.length - 1)]?.key ?? 'view'
   }

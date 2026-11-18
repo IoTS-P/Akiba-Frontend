@@ -59,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import TreeRow from '@/components/projects/TreeRow.vue'
 import { projectApi, fileApi } from '@/services/api'
 
@@ -239,7 +239,17 @@ async function deleteProject() {
   }
 }
 
-onMounted(loadProjects)
+function closeMenu() {
+  ctx.show = false
+}
+
+onMounted(() => {
+  void loadProjects()
+  // A menu that survives a click elsewhere stops being a menu and becomes a panel.
+  window.addEventListener('click', closeMenu)
+})
+
+onUnmounted(() => window.removeEventListener('click', closeMenu))
 void emit
 </script>
 

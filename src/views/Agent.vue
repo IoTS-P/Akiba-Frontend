@@ -3,8 +3,7 @@
 
     <main class="chat">
       <div v-if="!activeSessionId" class="empty-state">
-        <p>Select a conversation in the sidebar, or start a new one.</p>
-        <button class="btn-primary" @click="showNewModal = true">New conversation</button>
+        <p>Select a conversation in the sidebar, or start one with +.</p>
       </div>
       <template v-else>
       <div class="chat-body">
