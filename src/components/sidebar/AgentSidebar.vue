@@ -2,69 +2,115 @@
   <div class="agent-sidebar">
     <div class="search-row">
       <input v-model="query" type="search" placeholder="Search sessions…" aria-label="Search sessions" />
-      <button class="new-btn" title="New session" @click="newSession">+</button>
+      <button class="new-btn" title="New session" @click="create">+</button>
     </div>
 
-    <div v-if="loading" class="hint">Loading…</div>
-    <div v-else-if="!groups.length" class="hint">No sessions match.</div>
+    <div class="tree">
+      <div v-if="loading && !projects.length" class="hint">Loading…</div>
+      <div v-else-if="!projects.length" class="hint">No sessions yet.</div>
 
-    <div v-for="group in groups" :key="group.label" class="group">
-      <div class="group-label">{{ group.label }}</div>
-      <button
-        v-for="s in group.sessions"
-        :key="s.sessionId"
-        class="session"
-        :class="{ active: s.sessionId === activeId }"
-        @click="open(s.sessionId)"
-      >
-        <span class="dot" :class="statusClass(s.status)"></span>
-        <span class="name" :title="s.sessionName || s.sessionId">{{ s.sessionName || shortId(s.sessionId) }}</span>
-        <span class="meta">{{ s.projectName || '—' }}</span>
-      </button>
+      <div v-for="p in projects" :key="p.name" class="project">
+        <button class="project-row" @click="toggle(p.name)">
+          <span class="chevron">{{ isOpen(p.name) ? '▾' : '▸' }}</span>
+          <span class="project-name" :title="p.name">{{ p.name }}</span>
+          <span class="count">{{ p.sessions.length }}</span>
+        </button>
+
+        <div v-if="isOpen(p.name)" class="sessions">
+          <button
+            v-for="s in p.sessions"
+            :key="s.sessionId"
+            class="session"
+            :class="{ active: s.sessionId === activeId }"
+            :title="`${s.sessionName || s.sessionId}\n${s.sessionId}`"
+            @click="select(s.sessionId)"
+            @dblclick="open(s.sessionId)"
+            @contextmenu.prevent="menu($event, s.sessionId)"
+          >
+            <span class="dot" :class="statusClass(s.status)"></span>
+            <span class="name">{{ s.sessionName || shortId(s.sessionId) }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right click: what you can do with a conversation besides looking at it. -->
+    <div
+      v-if="ctx.show"
+      class="ctx"
+      :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
+      @click.self="ctx.show = false"
+    >
+      <div class="ctx-item" @click="open(ctx.sessionId)">Open conversation</div>
+      <div class="ctx-item" @click="openWorkspace(ctx.sessionId)">View workspace</div>
+      <div class="ctx-sep"></div>
+      <div class="ctx-item" @click="exportOne(ctx.sessionId, 'self')">Export conversation</div>
+      <div class="ctx-item" @click="exportOne(ctx.sessionId, 'tree')">Export with sub-agents</div>
+      <div class="ctx-sep"></div>
+      <div class="ctx-item danger" @click="remove(ctx.sessionId)">Delete conversation</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { agentApi } from '@/services/api'
 import { shortId } from '@/utils/agentFormat'
 import type { AgentSession } from '@/types'
 
-const props = defineProps<{ activeId: string | null }>()
-const emit = defineEmits<{ open: [id: string]; create: [] }>()
+defineProps<{ activeId: string | null }>()
+const emit = defineEmits<{ open: [id: string]; workspace: [id: string] }>()
 
-const route = useRoute()
 const router = useRouter()
-
 const sessions = ref<AgentSession[]>([])
 const query = ref('')
 const loading = ref(false)
+const openProjects = ref<Set<string>>(new Set())
+
+const ctx = reactive({ show: false, x: 0, y: 0, sessionId: '' })
 
 /**
- * Sessions grouped the way they are actually looked for: what is running, what is idle,
- * and everything older. A flat list of fifty rows is a list nobody scans.
+ * Projects are the top level because a conversation only means something inside one:
+ * "fix the parser" is a different conversation per project, and the same name in two
+ * projects is not the same work.
  */
-const groups = computed(() => {
+const projects = computed(() => {
   const q = query.value.trim().toLowerCase()
-  const visible = sessions.value.filter(s => {
-    if (!q) return true
-    return (s.sessionName ?? '').toLowerCase().includes(q)
-      || (s.projectName ?? '').toLowerCase().includes(q)
-      || s.sessionId.toLowerCase().includes(q)
-  })
+  const byProject = new Map<string, AgentSession[]>()
 
-  const running = visible.filter(s => s.status === 'running' || s.status === 'standby' || s.status === 'msghandle')
-  const idle = visible.filter(s => s.status === 'closed')
-  const other = visible.filter(s => !running.includes(s) && !idle.includes(s))
+  for (const s of sessions.value) {
+    if (q) {
+      const hit = (s.sessionName ?? '').toLowerCase().includes(q)
+        || s.sessionId.toLowerCase().includes(q)
+        || (s.projectName ?? '').toLowerCase().includes(q)
+      if (!hit) continue
+    }
+    const key = s.projectName || 'No project'
+    const list = byProject.get(key) ?? []
+    list.push(s)
+    byProject.set(key, list)
+  }
 
-  const out: { label: string; sessions: AgentSession[] }[] = []
-  if (running.length) out.push({ label: `Running (${running.length})`, sessions: running })
-  if (other.length) out.push({ label: `Paused or failed (${other.length})`, sessions: other })
-  if (idle.length) out.push({ label: `Closed (${idle.length})`, sessions: idle })
-  return out
+  return [...byProject.entries()]
+    .map(([name, list]) => ({ name, sessions: list.sort(byActivity) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 })
+
+function byActivity(a: AgentSession, b: AgentSession): number {
+  return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+}
+
+function isOpen(name: string): boolean {
+  // A search expands what it matched; otherwise the tree starts folded.
+  return openProjects.value.has(name) || query.value.trim().length > 0
+}
+
+function toggle(name: string) {
+  const next = new Set(openProjects.value)
+  next.has(name) ? next.delete(name) : next.add(name)
+  openProjects.value = next
+}
 
 function statusClass(status: string): string {
   if (status === 'running' || status === 'standby' || status === 'msghandle') return 'on'
@@ -73,14 +119,57 @@ function statusClass(status: string): string {
   return 'idle'
 }
 
+function select(id: string) {
+  // Single click previews; the route carries the choice, the tab bar follows it.
+  router.push({ path: '/agent', query: { sessionId: id } })
+}
+
 function open(id: string) {
-  if (id === props.activeId) return
+  ctx.show = false
   emit('open', id)
   router.push({ path: '/agent', query: { sessionId: id } })
 }
 
-function newSession() {
-  emit('create')
+function openWorkspace(id: string) {
+  ctx.show = false
+  emit('workspace', id)
+}
+
+function create() {
+  router.push({ path: '/agent', query: { new: '1' } })
+}
+
+function menu(event: MouseEvent, sessionId: string) {
+  ctx.show = true
+  ctx.x = event.clientX
+  ctx.y = event.clientY
+  ctx.sessionId = sessionId
+}
+
+async function remove(id: string) {
+  ctx.show = false
+  if (!window.confirm('Delete this conversation? This cannot be undone.')) return
+  try {
+    await agentApi.deleteSession(id)
+    sessions.value = sessions.value.filter(s => s.sessionId !== id)
+  } catch {
+    // Leave the row in place: a failed delete must not look like a successful one.
+  }
+}
+
+async function exportOne(id: string, scope: 'self' | 'tree') {
+  ctx.show = false
+  try {
+    const { data } = await agentApi.exportSession(id, scope)
+    const url = URL.createObjectURL(new Blob([data as unknown as BlobPart]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `session-${shortId(id)}${scope === 'tree' ? '-tree' : ''}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    // Nothing to show but the absence of a file.
+  }
 }
 
 async function load() {
@@ -95,17 +184,20 @@ async function load() {
   }
 }
 
+function closeMenu() {
+  ctx.show = false
+}
+
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   void load()
   timer = setInterval(() => void load(), 15000)
+  window.addEventListener('click', closeMenu)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  window.removeEventListener('click', closeMenu)
 })
-
-// The route is the single source of truth for "which conversation is open".
-void route
 </script>
 
 <style scoped>
@@ -113,6 +205,7 @@ void route
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1;
 }
 
 .search-row {
@@ -143,23 +236,53 @@ void route
   background: var(--akiba-chat-hover);
 }
 
+.tree {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
 .hint {
   padding: 8px 12px;
   font-size: 12px;
   color: var(--akiba-chat-text-faint);
 }
 
-.group {
-  margin-bottom: 4px;
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  color: var(--vscode-editor-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
 
-.group-label {
-  padding: 6px 12px 2px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.project-row:hover {
+  background: var(--akiba-chat-hover);
+}
+
+.chevron {
+  width: 10px;
   color: var(--akiba-chat-text-faint);
+}
+
+.project-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  color: var(--akiba-chat-text-faint);
+  font-weight: 400;
+  font-size: 11px;
 }
 
 .session {
@@ -167,7 +290,7 @@ void route
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 12px;
+  padding: 4px 10px 4px 24px;
   background: transparent;
   border: none;
   color: var(--akiba-chat-text-muted);
@@ -187,8 +310,8 @@ void route
 }
 
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   flex: 0 0 auto;
   background: var(--akiba-chat-text-faint);
@@ -205,13 +328,36 @@ void route
   white-space: nowrap;
 }
 
-.meta {
-  flex: 0 0 auto;
-  color: var(--akiba-chat-text-faint);
-  font-size: 11px;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.ctx {
+  position: fixed;
+  z-index: 50;
+  min-width: 200px;
+  padding: 4px 0;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--akiba-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+}
+
+.ctx-item {
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.ctx-item:hover {
+  background: var(--vscode-focusBorder);
+  color: #fff;
+}
+
+.ctx-item.danger:hover {
+  background: var(--akiba-danger);
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--vscode-panel-border);
 }
 </style>

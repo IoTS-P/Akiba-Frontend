@@ -32,11 +32,20 @@
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
       <!-- Agent lists conversations; the other activities still list their views. -->
-      <AgentSidebar
-        v-if="isAgentActivity"
-        :active-id="activeSessionId"
-        @create="go('/agent')"
-      />
+      <div v-if="isAgentActivity" class="sidebar-split">
+        <AgentSidebar
+          :active-id="activeSessionId"
+          class="split-top"
+          @open="openConversation"
+          @workspace="openWorkspace"
+        />
+        <WorkspacePanel
+          v-if="workspaceSessionId"
+          :session-id="workspaceSessionId"
+          class="split-bottom"
+          @close="workspaceSessionId = null"
+        />
+      </div>
       <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
@@ -91,6 +100,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
+import WorkspacePanel from '@/components/sidebar/WorkspacePanel.vue'
 
 interface ViewItem {
   path: string
@@ -143,6 +153,17 @@ const isAgentActivity = computed(() => route.path.startsWith('/agent'))
 const activeSessionId = computed(() =>
   typeof route.query.sessionId === 'string' ? route.query.sessionId : null
 )
+
+/** The conversation whose workspace is open below the session tree, if any. */
+const workspaceSessionId = ref<string | null>(null)
+
+function openConversation(id: string) {
+  router.push({ path: '/agent', query: { sessionId: id } })
+}
+
+function openWorkspace(id: string) {
+  workspaceSessionId.value = id
+}
 
 const currentRoute = computed(() => allViews.value.find(v => isActive(v.path))?.title ?? 'Akiba')
 const currentViewIcon = computed(() => allViews.value.find(v => isActive(v.path))?.icon ?? '◆')
@@ -247,6 +268,23 @@ async function handleLogout() {
   box-sizing: border-box;
   padding: 4px 8px;
   font-size: 12px;
+}
+
+.sidebar-split {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.split-top {
+  flex: 1 1 55%;
+  min-height: 120px;
+}
+
+.split-bottom {
+  flex: 1 1 45%;
+  min-height: 120px;
 }
 
 .nav {

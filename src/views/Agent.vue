@@ -1,139 +1,10 @@
 <template>
   <div class="agent-page">
-    <aside class="session-list" :class="{ 'session-list-open': sessionListOpen }">
-      <div v-if="sessionListOpen" class="session-list-content">
-        <div class="session-header">
-          <h3>Sessions</h3>
-          <button class="btn-primary small" @click="openNewSessionModal" :disabled="creatingSession">
-            {{ creatingSession ? '…' : '+ New' }}
-          </button>
-        </div>
-        <div class="session-filter">
-          <input
-            v-model="searchQuery"
-            class="session-filter-input"
-            type="text"
-            placeholder="Search title / content…"
-            @input="onSearchInput"
-          />
-          <FilterDropdown
-            v-model="projectFilter"
-            :options="projectOptions"
-            placeholder="Select project…"
-            @change="onProjectFilterChange"
-          />
-          <label class="session-filter-running" title="Show only session trees that contain a running agent (across all projects)">
-            <input type="checkbox" v-model="onlyRunningTrees" />
-            <span class="running-dot-inline" :class="{ active: onlyRunningTrees }"></span>
-            Running only
-          </label>
-        </div>
-        <div class="session-hint muted small">
-          Click ▸ on any session to reveal its sub-agents.
-        </div>
-        <!--
-          The list area is the only part of the panel that scrolls.
-          We isolate it into its own container so the hover card
-          below can stay pinned to the bottom of the panel
-          regardless of how far the list is scrolled.  See
-          `.session-list-scroll` for the flex/overflow setup.
-        -->
-        <div class="session-list-scroll">
-          <div v-if="projectFilter === null && !searchActive && !onlyRunningTrees" class="muted small session-filter-hint">
-            Select a project above to view its agent sessions, or search across all sessions.
-          </div>
-          <div v-else-if="loadingSessions" class="muted small">Loading…</div>
-          <div v-else-if="searchingSessions" class="muted small">Searching…</div>
-          <div v-else-if="visibleSessions.length === 0" class="muted small session-filter-hint">
-            {{ searchActive ? 'No sessions match the search.' : (onlyRunningTrees ? 'No running session trees.' : 'No sessions match the current filter.') }}
-          </div>
-          <ul v-else class="sessions">
-            <SessionTreeItem
-              v-for="s in visibleSessions"
-              :key="s.sessionId"
-              :session="s"
-              :depth="0"
-              :active-session-id="activeSessionId"
-              :expanded-ids="expandedSessionIds"
-              :children-map="childrenBySessionId"
-              :loading-ids="childrenLoading"
-              :flash-nonces="flashNonces"
-              @select="selectSession"
-              @delete="deleteSession"
-              @toggle="toggleSessionExpand"
-              @hover="onSessionHover"
-              @leave="onSessionLeave"
-              @context="openContextMenu"
-            />
-          </ul>
-        </div>
-
-        <!--
-          Sticky hover card.  Sits below the scrolling list and
-          inside the same flex column, so its width is automatically
-          bound by the panel's inner padding.  Always-on tooltip on
-          the row itself already provides a quick read; this card
-          adds the full status row + badges + timestamp that don't
-          fit on the 244px-wide row.
-        -->
-        <div v-if="hoveredSession" class="session-hover-card" :class="`status-${hoveredStatusKey}`">
-          <div class="hover-card-row hover-card-status">
-            <span
-              :class="['status-row', hoveredSession.status, hoveredKind === 'non-terminal' ? 'status-row-active' : '']"
-              :title="statusTooltip(hoveredSession.status)"
-            >
-              <span v-if="hoveredKind === 'non-terminal'" class="status-row-dot"></span>
-              {{ statusLabel(hoveredSession.status) }}
-            </span>
-          </div>
-          <div class="hover-card-row hover-card-tags">
-            <span
-              v-if="hoveredSession.parentSessionId"
-              class="subagent-tag"
-              title="This is a sub-agent session (child of another session)"
-            >🧩 sub-agent</span>
-          </div>
-          <div class="hover-card-row hover-card-time">
-            {{ formatTime(hoveredSession.updatedAt || hoveredSession.createdAt) || '—' }}
-          </div>
-          <div
-            class="hover-card-row hover-card-uuid"
-            :title="hoveredSession.sessionId"
-          >
-            <span class="hover-card-uuid-label">UUID</span>
-            <code class="hover-card-uuid-value">{{ hoveredSession.sessionId }}</code>
-          </div>
-        </div>
-
-        <!-- Right-click context menu -->
-        <div
-          v-if="ctxMenu.show"
-          class="ctx-menu"
-          :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-          @click.self="ctxMenu.show = false"
-        >
-          <div class="ctx-menu-item" @click="renameFromMenu">✎ Rename conversation</div>
-          <div class="ctx-menu-divider"></div>
-          <div class="ctx-menu-item" @click="exportSession(ctxMenu.sessionId)">📥 Export this session</div>
-          <div class="ctx-menu-item" @click="exportSessionTree(ctxMenu.sessionId)">🌳 Export full tree (this + sub-agents)</div>
-        </div>
-      </div>
-      <button
-        class="session-list-toggle"
-        :title="sessionListOpen ? 'Hide sessions' : 'Show sessions'"
-        @click="toggleSessionList"
-      >
-        <span class="session-list-toggle-icon">{{ sessionListOpen ? '◀' : '▶' }}</span>
-        <span class="session-list-toggle-label">
-          📋
-          <span v-if="visibleSessions.length > 0" class="session-list-count">{{ visibleSessions.length }}</span>
-        </span>
-      </button>
-    </aside>
 
     <main class="chat">
       <div v-if="!activeSessionId" class="empty-state">
-        <p>Select a session on the left, or create a new one to start chatting.</p>
+        <p>Select a conversation in the sidebar, or start a new one.</p>
+        <button class="btn-primary" @click="showNewModal = true">New conversation</button>
       </div>
       <template v-else>
       <div class="chat-body">
@@ -646,8 +517,6 @@ import { agentApi, llmConfigApi, projectApi } from '@/services/api'
 import type { AgentSession, AgentMessage, SubAgentSummary } from '@/types'
 import type { StoredKeyEntry } from '@/services/api'
 import { renderMarkdown, fixLiteralNewlines } from '@/utils/format'
-import SessionTreeItem from '@/components/SessionTreeItem.vue'
-import FilterDropdown from '@/components/FilterDropdown.vue'
 import ConversationPanel from '@/components/agent/ConversationPanel.vue'
 import NewSessionModal from '@/components/agent/NewSessionModal.vue'
 import ToolConfirmModal from '@/components/agent/ToolConfirmModal.vue'
@@ -734,7 +603,6 @@ const projectFilter = ref<string | null>(null)
 const searchQuery = ref('')
 /** Ids returned by the last backend search; null = not searching. */
 const searchMatchIds = ref<Set<string> | null>(null)
-const searchingSessions = ref(false)
 let searchDebounce: number | null = null
 
 /**
@@ -744,142 +612,23 @@ let searchDebounce: number | null = null
  * non-terminal state.
  */
 const allSessionsIndex = ref<Map<string, AgentSession>>(new Map())
-/** When checked, the list shows only session trees containing a running agent. */
-const onlyRunningTrees = ref(false)
 
-/** Walk the parent chain up to the tree's root (cycle-safe). */
-function rootIdOf(s: AgentSession, byId: Map<string, AgentSession>): string {
-  let cur = s
-  const seen = new Set<string>()
-  while (cur.parentSessionId) {
-    if (!seen.add(cur.sessionId)) break
-    const parent = byId.get(cur.parentSessionId)
-    if (!parent) break
-    cur = parent
-  }
-  return cur.sessionId
-}
 
-/** Root ids of session trees that contain at least one non-terminal member. */
-const runningRootIds = computed<Set<string>>(() => {
-  const roots = new Set<string>()
-  // Top-level rows may be fresher than the last ALL poll — check them too.
-  for (const s of sessions.value) {
-    if (!isTerminalStatus(s.status)) roots.add(s.sessionId)
-  }
-  const byId = allSessionsIndex.value
-  for (const s of byId.values()) {
-    if (isTerminalStatus(s.status)) continue
-    roots.add(rootIdOf(s, byId))
-  }
-  return roots
-})
 
-const searchActive = computed(() => searchMatchIds.value !== null)
 
 function projectKeyOf(s: AgentSession): string {
   const v = s.projectName?.trim()
   return v ? v : NO_PROJECT
 }
 
-interface FilterOption {
-  value: string
-  label: string
-  count?: number
-  /** True when any session in this group is in a non-terminal state. */
-  running?: boolean
-}
-
-/** Accumulate per-group session counts and running flags for the dropdowns. */
-function groupOptions(
-  list: AgentSession[],
-  keyOf: (s: AgentSession) => string,
-  labelOf: (key: string) => string
-): FilterOption[] {
-  const groups = new Map<string, { n: number; running: boolean }>()
-  for (const s of list) {
-    const k = keyOf(s)
-    const g = groups.get(k) ?? { n: 0, running: false }
-    g.n++
-    if (!isTerminalStatus(s.status)) g.running = true
-    groups.set(k, g)
-  }
-  return [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([value, g]) => ({
-      value,
-      label: labelOf(value),
-      count: g.n,
-      running: g.running
-    }))
-}
-
-const projectOptions = computed<FilterOption[]>(() =>
-  groupOptions(
-    sessions.value,
-    projectKeyOf,
-    v => (v === NO_PROJECT ? '(no project)' : v)
-  )
-)
-
-/** Sessions inside the selected project. */
-function sessionsOfProject(): AgentSession[] {
-  return sessions.value.filter(s => projectFilter.value === null || projectKeyOf(s) === projectFilter.value)
-}
-
-const visibleSessions = computed<AgentSession[]>(() => {
-  // Searching overrides the project gate: its purpose is precisely to
-  // locate a session when the user does not know which project holds it.
-  if (searchActive.value) {
-    const ids = searchMatchIds.value!
-    return sessions.value.filter(s => ids.has(s.sessionId))
-  }
-  // "Running only" is a global quick view (like search): it bypasses
-  // the project gate so all live trees surface in one place.
-  if (onlyRunningTrees.value) {
-    return sessions.value.filter(s => runningRootIds.value.has(s.sessionId))
-  }
-  if (projectFilter.value === null) return []
-  return sessionsOfProject()
-})
-
-function onProjectFilterChange() {
-  const first = visibleSessions.value[0]
-  if (first) selectSession(first.sessionId)
-}
 
 
-function onSearchInput() {
-  if (searchDebounce !== null) { clearTimeout(searchDebounce); searchDebounce = null }
-  const q = searchQuery.value.trim()
-  if (q.length < 2) {
-    searchMatchIds.value = null
-    return
-  }
-  searchDebounce = window.setTimeout(() => { void runSearch(q) }, 400)
-}
 
-async function runSearch(q: string) {
-  searchingSessions.value = true
-  try {
-    const { data } = await agentApi.searchSessions(q)
-    searchMatchIds.value = new Set((data.sessions || []).map(s => s.sessionId))
-  } catch (e) {
-    // Fall back to client-side title/UUID matching when the backend
-    // search route is unavailable (e.g. an older daemon).
-    console.warn('Session search failed, falling back to title match:', e)
-    const needle = q.toLowerCase()
-    searchMatchIds.value = new Set(
-      sessions.value
-        .filter(s =>
-          (s.sessionName ?? '').toLowerCase().includes(needle) ||
-          s.sessionId.toLowerCase().includes(needle))
-        .map(s => s.sessionId)
-    )
-  } finally {
-    searchingSessions.value = false
-  }
-}
+
+
+
+
+
 
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
@@ -915,7 +664,6 @@ const turnRunning = computed(() =>
   activeSessionRow.value?.runtimeState === 'running' ||
   activeSessionRow.value?.status === 'running'
 )
-const exportingTree = ref(false)
 const errorMsg = ref('')
 const input = ref('')
 const tokenUsage = ref<{ input: number; output: number } | null>(null)
@@ -1006,84 +754,15 @@ const messagesEl = ref<HTMLElement | null>(null)
 // ---- Context menu ----------------------------------------------------------
 const ctxMenu = reactive({ show: false, x: 0, y: 0, sessionId: '' })
 
-function openContextMenu(e: MouseEvent, sessionId: string, _name: string) {
-  ctxMenu.show = true
-  ctxMenu.x = e.clientX
-  ctxMenu.y = e.clientY
-  ctxMenu.sessionId = sessionId
-}
 
 // Close context menu on any click outside
 document.addEventListener('click', () => {
   if (ctxMenu.show) ctxMenu.show = false
 })
 
-/**
- * Build a sanitised filename stem for a downloaded Markdown export.
- *
- * The session name may contain arbitrary user text; we keep only
- * letters, digits, dot, underscore, hyphen and clamp the length so the
- * resulting filename is safe across operating systems and shells.
- */
-function exportFileStem(sessionId: string, sessionName?: string | null): string {
-  const base = (sessionName || '').trim()
-  const safe = base
-    ? base.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-    : sessionId.slice(0, 8)
-  return safe || sessionId.slice(0, 8)
-}
 
-/** Trigger a browser download for a Blob returned by the export endpoint. */
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  // Defer revocation so the browser has time to start the download.
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
-async function exportSession(sessionId: string) {
-  ctxMenu.show = false
-  try {
-    const resp = await agentApi.exportSession(sessionId, 'self')
-    const stem = exportFileStem(sessionId)
-    downloadBlob(new Blob([resp.data], { type: 'text/markdown' }), `session_${stem}.md`)
-  } catch (_e: any) {
-    errorMsg.value = 'Failed to export session.'
-  }
-}
 
-/**
- * Export the full agent tree rooted at [sessionId] as Markdown.
- *
- * Walks the same parent → child graph the frontend already renders and
- * asks the backend for a single Markdown document that contains:
- *   - a header with overall export metadata
- *   - an "Agent Tree" section with per-layer statistics and an ASCII
- *     tree diagram
- *   - one peer section per agent (in DFS pre-order) with its own stats
- *     and its full transcript
- *
- * Invoked from the right-click context menu on the session list.
- */
-async function exportSessionTree(sessionId: string) {
-  ctxMenu.show = false
-  if (!sessionId) return
-  exportingTree.value = true
-  try {
-    const resp = await agentApi.exportSession(sessionId, 'tree')
-    const stem = exportFileStem(sessionId)
-    downloadBlob(new Blob([resp.data], { type: 'text/markdown' }), `agent_tree_${stem}.md`)
-  } catch (_e: any) {
-    errorMsg.value = 'Failed to export agent tree.'
-  } finally {
-    exportingTree.value = false
-  }
-}
 
 // ---- LLM config ------------------------------------------------------------
 const llmConfigs = ref<StoredKeyEntry[]>([])
@@ -1233,11 +912,7 @@ function syncLlmPickerWithSession(modelName?: string | null) {
 // Default `true` preserves the legacy behaviour where the list was
 // always visible — switching sessions is a primary action and the user
 // should not have to expand a panel to do it.
-const sessionListOpen = ref(true)
 
-function toggleSessionList() {
-  sessionListOpen.value = !sessionListOpen.value
-}
 
 // ---- Inline sub-agent tree (left-side list) ---------------------------
 //
@@ -1251,7 +926,6 @@ function toggleSessionList() {
 //     without re-mounting any list item.
 const expandedSessionIds = ref<Set<string>>(new Set())
 const childrenBySessionId = ref<Record<string, AgentSession[]>>({})
-const childrenLoading = ref<Set<string>>(new Set())
 
 /**
  * Per-session "flash nonce" — incremented every time the
@@ -1285,81 +959,8 @@ function markSessionStatusChanged(sessionId: string) {
   flashNonces.value = next
 }
 
-/**
- * Toggle the expand/collapse state of one session in the inline tree.
- *
- *  * If the session is currently collapsed, mark it expanded AND
- *    kick off a fetch for its direct children.
- *  * If the session is already expanded, just collapse it; the
- *    children are kept in the cache for the next expand.
- *
- *  We intentionally re-fetch even on a previously-cached empty
- *  list: a parent that had no sub-agents at the last visit may
- *  have spawned one since.  Re-fetching on every expand is the
- *  simplest way to let the count badge appear the moment a
- *  child comes into existence, without polling every parent's
- *  children list every 6s.  `loadChildrenFor` is idempotent via
- *  the `childrenLoading` set, so a stuck click cannot stack
- *  parallel requests.
- */
-async function toggleSessionExpand(sessionId: string) {
-  const next = new Set(expandedSessionIds.value)
-  if (next.has(sessionId)) {
-    next.delete(sessionId)
-    expandedSessionIds.value = next
-    return
-  }
-  next.add(sessionId)
-  expandedSessionIds.value = next
-  // Always kick off a fetch on expand.  For an already-known
-  // parent this is a small redundant call, but it ensures a
-  // previously-empty parent can "discover" newly-spawned
-  // children without the user having to refresh the whole list.
-  if (childrenLoading.value.has(sessionId)) return
-  await loadChildrenFor(sessionId)
-}
 
-/**
- * Fetch the direct children of [sessionId] and store them in the
- * cache.  Idempotent against concurrent calls — the loading set
- * guards against stacking parallel requests for the same parent.
- */
-async function loadChildrenFor(sessionId: string) {
-  if (childrenLoading.value.has(sessionId)) return
-  const loading = new Set(childrenLoading.value)
-  loading.add(sessionId)
-  childrenLoading.value = loading
-  try {
-    const { data } = await agentApi.listChildren(sessionId)
-    childrenBySessionId.value = {
-      ...childrenBySessionId.value,
-      [sessionId]: data.children || [],
-    }
-  } catch {
-    // On error, store an empty list so the UI doesn't keep retrying
-    // on every expand click.  The user can collapse and re-expand
-    // (or wait for the next status poll) to try again.
-    childrenBySessionId.value = {
-      ...childrenBySessionId.value,
-      [sessionId]: [],
-    }
-  } finally {
-    const done = new Set(childrenLoading.value)
-    done.delete(sessionId)
-    childrenLoading.value = done
-  }
-}
 
-/**
- * Drop cached children for a parent — used when one of its children
- * is deleted so the parent's "N sub-agents" badge stays accurate.
- */
-function invalidateChildrenFor(parentId: string) {
-  if (childrenBySessionId.value[parentId] === undefined) return
-  const next = { ...childrenBySessionId.value }
-  delete next[parentId]
-  childrenBySessionId.value = next
-}
 
 // ---- Sticky hover card --------------------------------------------------
 //
@@ -1377,55 +978,9 @@ function invalidateChildrenFor(parentId: string) {
 const hoveredSession = ref<AgentSession | null>(null)
 let hoverLeaveTimer: ReturnType<typeof setTimeout> | null = null
 
-function onSessionHover(session: AgentSession) {
-  if (hoverLeaveTimer != null) {
-    clearTimeout(hoverLeaveTimer)
-    hoverLeaveTimer = null
-  }
-  // Avoid re-triggering reactivity for the same row.
-  if (hoveredSession.value?.sessionId !== session.sessionId) {
-    hoveredSession.value = session
-  }
-}
 
-function onSessionLeave(session: AgentSession) {
-  // Only clear the card if the leaving session is the one we are
-  // currently showing.  This is the case when the pointer moves
-  // directly to a *different* row (whose own `hover` event will
-  // overwrite `hoveredSession` immediately, before the timer
-  // fires).  We keep a small timeout so micro-gaps between rows
-  // do not flash the card empty.
-  if (hoveredSession.value?.sessionId !== session.sessionId) return
-  if (hoverLeaveTimer != null) clearTimeout(hoverLeaveTimer)
-  hoverLeaveTimer = setTimeout(() => {
-    hoveredSession.value = null
-    hoverLeaveTimer = null
-  }, 80)
-}
 
-/** Lowercased status key for the hover card's `status-` class. */
-const hoveredStatusKey = computed(() => {
-  const s = (hoveredSession.value?.status ?? '').toLowerCase()
-  switch (s) {
-    case 'active':    return 'running'
-    case 'suspended': return 'standby'
-    default:          return s || 'unknown'
-  }
-})
 
-/** Lifecycle classification for the hover card's status dot. */
-const hoveredKind = computed<'non-terminal' | 'terminal' | 'unknown'>(() => {
-  const s = (hoveredSession.value?.status ?? '').toLowerCase()
-  if (
-    s === 'running' || s === 'standby' || s === 'msghandle' ||
-    s === 'paused' || s === 'cancelling' || s === 'active' || s === 'suspended'
-  ) return 'non-terminal'
-  if (
-    s === 'closed' || s === 'error' ||
-    s === 'completed' || s === 'cancelled' || s === 'failed'
-  ) return 'terminal'
-  return 'unknown'
-})
 
 async function loadSessions() {
   loadingSessions.value = true
@@ -1445,9 +1000,6 @@ async function loadSessions() {
   }
 }
 
-function openNewSessionModal() {
-  showNewModal.value = true
-}
 
 /** The modal created a session: reveal it and select it. */
 async function onSessionCreated(data: AgentSession) {
@@ -1951,14 +1503,6 @@ const sessionRenameInput = ref<HTMLInputElement | null>(null)
 const projectPrograms = ref<string[]>([])
 const programBusy = ref(false)
 
-/** Rename the session picked in the sidebar: open it, then edit the title. */
-async function renameFromMenu() {
-  const id = ctxMenu.sessionId
-  ctxMenu.show = false
-  if (!id) return
-  if (activeSessionId.value !== id) await selectSession(id)
-  startSessionRename()
-}
 
 function startSessionRename() {
   sessionNameDraft.value = activeSessionName.value
@@ -2024,6 +1568,15 @@ async function onProgramChange(event: Event) {
  * The sidebar (and any deep link) selects a conversation through the route, so the view
  * follows it instead of owning the choice alone.
  */
+// The sidebar's + button opens the modal through the route, the same way it selects.
+watch(
+  () => route.query.new,
+  (v) => {
+    if (v === '1') showNewModal.value = true
+  },
+  { immediate: true },
+)
+
 watch(
   () => route.query.sessionId,
   (id) => {
@@ -2117,71 +1670,6 @@ async function selectSession(id: string) {
   startStatusPolling()
 }
 
-async function deleteSession(id: string) {
-  // Reject deletion of sessions that are still running.  The
-  // backend also enforces this, but checking here gives the user
-  // immediate feedback without a round-trip.
-  const session = sessions.value.find(s => s.sessionId === id)
-    ?? transientSessionsById.value[id]
-    ?? Object.values(childrenBySessionId.value)
-      .flat()
-      .find(s => s.sessionId === id)
-  if (session && !isTerminalStatus(session.status)) {
-    alert('This session is still running. Please end the flow first before deleting.')
-    return
-  }
-  if (!confirm('Delete this session and all of its sub-agent sessions?')) return
-  // Reuse the session we already found above for parent lookup.
-  const deleted = session
-  try {
-    await agentApi.deleteSession(id)
-    sessions.value = sessions.value.filter((s) => s.sessionId !== id)
-    // Drop from the transient map as well so a deleted sub-agent
-    // no longer drives the chat header.
-    if (transientSessionsById.value[id] !== undefined) {
-      const next = { ...transientSessionsById.value }
-      delete next[id]
-      transientSessionsById.value = next
-    }
-    // Drop the deleted session from any cached children list so
-    // the inline tree stops showing it.  Also drop the cache entry
-    // for the parent so the next expand re-fetches with an
-    // up-to-date child count.
-    const cleaned: Record<string, AgentSession[]> = {}
-    for (const [parentId, kids] of Object.entries(childrenBySessionId.value)) {
-      const filtered = kids.filter(s => s.sessionId !== id)
-      // Only keep the cache entry if the parent still has known
-      // children OR the entry hasn't been confirmed-empty yet.
-      if (filtered.length > 0 || childrenLoading.value.has(parentId)) {
-        cleaned[parentId] = filtered
-      }
-    }
-    childrenBySessionId.value = cleaned
-    if (deleted?.parentSessionId) {
-      invalidateChildrenFor(deleted.parentSessionId)
-    }
-    // Collapse the deleted session if it was expanded so the
-    // child `<ul>` disappears immediately.
-    if (expandedSessionIds.value.has(id)) {
-      const next = new Set(expandedSessionIds.value)
-      next.delete(id)
-      expandedSessionIds.value = next
-    }
-    if (activeSessionId.value === id) {
-      activeSessionId.value = null
-      messages.value = []
-      tokenUsage.value = null
-    }
-  } catch (e: any) {
-    const status = e?.response?.status
-    const msg = e?.response?.data?.error || e?.message || 'Failed to delete session'
-    if (status === 409) {
-      alert(msg)
-    } else {
-      console.error('Failed to delete session:', e)
-    }
-  }
-}
 
 /**
  * Optimistic user bubble awaiting DB confirmation.  The interactive
