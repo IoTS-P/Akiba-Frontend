@@ -8,7 +8,7 @@
         <span class="title">{{ script?.name }}</span>
         <span class="saved" :class="{ dirty }">{{ dirty ? 'Saving…' : 'Saved' }}</span>
       </div>
-      <div class="body">
+      <div v-if="script" class="body">
         <WorkspaceEditor
           v-model="code"
           :language="script?.language || 'kotlin'"
@@ -16,6 +16,7 @@
           @save="save"
         />
       </div>
+      <div v-else class="empty">Loading…</div>
     </template>
   </div>
 </template>
@@ -43,7 +44,8 @@ async function load(id: number) {
     const { data } = await scriptApi.get(id)
     script.value = data
     // A model that is already open may hold edits newer than the server's copy.
-    code.value = textOf(`akiba://script/${id}`) ?? data.code ?? ''
+    const open = textOf(`akiba://script/${id}`)
+    code.value = open ?? data.code ?? ''
     dirty.value = false
   } catch {
     script.value = null
