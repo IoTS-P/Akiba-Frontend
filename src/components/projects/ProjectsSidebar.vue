@@ -143,7 +143,7 @@ async function reload(name: string) {
     const message = e?.response?.data?.error || ''
     // While an import holds the project, reading its tree fails. That is expected, not news.
     if (!(importing.value.has(name) && /in use/i.test(message))) {
-      error.value = message || `Could not read project ${name}.`
+      error.value = explainFailure(message || `Could not read project ${name}.`, name)
     }
   } finally {
     loading[name] = false
@@ -187,6 +187,17 @@ async function waitForBinaryId(name: string, timeoutMs = 120_000): Promise<numbe
   return null
 }
 
+/**
+ * "in use" is Ghidra's word for a lock held by another process, which in Akiba means a session
+ * is working in this project. Saying that is more useful than repeating the lock's own error.
+ */
+function explainFailure(message: string, project: string): string {
+  if (/in use/i.test(message)) {
+    return `${project} is open by a running session. Stop that session or wait for it to finish, then try again.`
+  }
+  return message
+}
+
 async function importInto(project: string, folder: string, ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
@@ -206,7 +217,7 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
       await projectApi.importBinary(project, { binaryId: String(id), folder })
     }
   } catch (e: any) {
-    error.value = e?.response?.data?.error || 'Import failed.'
+    error.value = explainFailure(e?.response?.data?.error || 'Import failed.', project)
   } finally {
     const done = new Set(importing.value)
     done.delete(project)
