@@ -3741,7 +3741,7 @@ watch(
   position: absolute;
   top: -4px;
   right: -10px;
-  background: #e94560;
+  background: var(--vscode-button-background);
   color: #fff;
   font-size: 9px;
   font-weight: 700;
@@ -3766,7 +3766,7 @@ watch(
 
 .btn-primary {
   padding: 10px 18px;
-  background: #e94560;
+  background: var(--vscode-button-background);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -3788,7 +3788,7 @@ watch(
 .sessions li:hover { background: #fafafa; }
 .sessions li.active {
   background: #fff5f7;
-  border-color: #e94560;
+  border-color: var(--vscode-button-background);
 }
 .sessions li .title {
   font-size: 14px;
@@ -3838,7 +3838,7 @@ watch(
   font-size: 16px;
   line-height: 1;
 }
-.sessions li .del:hover { color: #e94560; }
+.sessions li .del:hover { color: var(--vscode-button-background); }
 
 .status {
   font-size: 11px;
@@ -4413,7 +4413,7 @@ watch(
 }
 
 .msg.user .content {
-  background: #e94560;
+  background: var(--vscode-button-background);
   color: #fff;
   border-bottom-right-radius: 4px;
 }
@@ -4530,7 +4530,7 @@ watch(
   overflow-y: auto;
 }
 .tool-result-text {
-  background: #1a1a2e;
+  background: var(--vscode-editor-background);
   color: #e0e0e0;
 }
 
@@ -4842,7 +4842,7 @@ watch(
   color: #888;
 }
 .llm-link {
-  color: #e94560;
+  color: var(--vscode-button-background);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -4926,7 +4926,7 @@ watch(
   user-select: none;
   white-space: nowrap;
 }
-.ctx-menu-item:hover { background: #fff5f7; color: #e94560; }
+.ctx-menu-item:hover { background: #fff5f7; color: var(--vscode-button-background); }
 
 /* ---- Session list hint --------------------------------------------------- */
 .session-hint {
@@ -5175,7 +5175,7 @@ watch(
   word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
-  background: #1a1a2e;
+  background: var(--vscode-editor-background);
   color: #e0e0e0;
   border-radius: 4px;
   font-family: 'Courier New', monospace;
@@ -5221,7 +5221,7 @@ watch(
   font-size: 12px; font-family: 'Courier New', monospace;
 }
 .msg .content pre.md-code-block {
-  background: #1a1a2e; color: #e0e0e0; padding: 10px 14px;
+  background: var(--vscode-editor-background); color: #e0e0e0; padding: 10px 14px;
   border-radius: 6px; overflow-x: auto; font-size: 12px;
   line-height: 1.5; margin: 8px 0;
 }

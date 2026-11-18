@@ -1,0 +1,94 @@
+/*
+ * Akiba design tokens.
+ *
+ * The interface grew two visual languages: a light shell (menus, forms, project pages)
+ * and a dark conversation surface. Rather than pretend otherwise, the tokens name the
+ * surface they belong to. Phase 2 of the redesign flips one variable to make them agree.
+ *
+ * Naming follows VSCode where a VSCode equivalent exists, so an official theme can be
+ * dropped in later without re-learning the vocabulary.
+ */
+
+:root {
+  /* ---- shell (light, as it renders today) ------------------------------- */
+  --akiba-shell-bg: #f5f5f5;
+  --akiba-shell-surface: #ffffff;
+  --akiba-shell-surface-alt: #fafafa;
+  --akiba-shell-hover: #eee;
+  --akiba-shell-border: #dddddd;
+  --akiba-shell-border-strong: #cccccc;
+  --akiba-shell-text: #333333;
+  --akiba-shell-text-muted: #666666;
+  --akiba-shell-text-faint: #888888;
+
+  /* ---- conversation surface (dark) -------------------------------------- */
+  --akiba-chat-bg: #1a1a2e;
+  --akiba-chat-surface: #1e1e2e;
+  --akiba-chat-surface-alt: #313244;
+  --akiba-chat-border: #333346;
+  --akiba-chat-text: #cdd6f4;
+  --akiba-chat-text-muted: #a6adc8;
+  --akiba-chat-text-faint: #6b7280;
+
+  /* ---- brand and status ------------------------------------------------ */
+  --akiba-accent: #e94560;
+  --akiba-accent-hover: #d63b54;
+  --akiba-accent-contrast: #ffffff;
+  --akiba-info: #1976d2;
+  --akiba-success: #2e7d32;
+  --akiba-warning: #ff9800;
+  --akiba-danger: #c62828;
+  --akiba-danger-hover: #d32f2f;
+
+  /* ---- shape and rhythm ------------------------------------------------- */
+  --akiba-radius-sm: 4px;
+  --akiba-radius-md: 6px;
+  --akiba-radius-lg: 12px;
+  --akiba-font-ui: 13px;
+  --akiba-font-code: 13px;
+  --akiba-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+  --akiba-font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  --akiba-line-height: 1.4;
+
+  /* ---- VSCode vocabulary ------------------------------------------------
+   * Same palette, the names an editor theme expects. The conversation surface uses
+   * these; the shell keeps its own names until phase 2 unifies them.
+   */
+  --vscode-editor-background: var(--akiba-chat-bg);
+  --vscode-editor-foreground: var(--akiba-chat-text);
+  --vscode-editorWidget-background: var(--akiba-chat-surface);
+  --vscode-input-background: var(--akiba-chat-surface-alt);
+  --vscode-panel-border: var(--akiba-chat-border);
+  --vscode-descriptionForeground: var(--akiba-chat-text-muted);
+  --vscode-disabledForeground: var(--akiba-chat-text-faint);
+  --vscode-button-background: var(--akiba-accent);
+  --vscode-button-foreground: var(--akiba-accent-contrast);
+  --vscode-focusBorder: var(--akiba-accent);
+  --vscode-textLink-foreground: var(--akiba-info);
+  --vscode-errorForeground: var(--akiba-danger);
+  --vscode-testing-iconPassed: var(--akiba-success);
+
+  /* ---- legacy aliases ---------------------------------------------------
+   * Components already reference these names with a hex fallback. Pointing them at
+   * tokens means a change lands here instead of everywhere, without rewriting the
+   * component first.
+   */
+  --text-primary: var(--vscode-editor-foreground);
+  --text-secondary: var(--vscode-descriptionForeground);
+  --text-dim: var(--vscode-disabledForeground);
+  --text: var(--vscode-editor-foreground);
+  --border: var(--vscode-panel-border);
+  --border-color: var(--vscode-panel-border);
+  --bg-card: var(--vscode-editorWidget-background);
+  --bg-accent: var(--vscode-input-background);
+  --bg-secondary: var(--vscode-input-background);
+  --bg-hover: var(--akiba-chat-surface-alt);
+  --accent: var(--vscode-focusBorder);
+  --accent-green: var(--akiba-success);
+  --accent-orange: var(--akiba-warning);
+  --primary: var(--vscode-button-background);
+  --card: var(--vscode-editorWidget-background);
+  --foreground: var(--vscode-editor-foreground);
+  --muted-foreground: var(--vscode-descriptionForeground);
+}
