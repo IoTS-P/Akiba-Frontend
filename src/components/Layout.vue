@@ -254,6 +254,8 @@ interface FileTab {
 const fileTabs = ref<FileTab[]>([])
 const activeKey = ref<string>('view')
 const saveTimers = new Map<string, number>()
+/** Files being read right now, so a double click cannot open the same file twice. */
+const opening = new Set<string>()
 
 /** Monaco needs a language id, not an extension; common ones are enough here. */
 function languageOf(path: string): string {
@@ -275,8 +277,15 @@ async function openFileInEditor(path: string) {
     activeKey.value = existing.key
     return
   }
+  if (opening.has(path)) return
+  opening.add(path)
   try {
     const { data } = await workspaceApi.readFile(workspaceSessionId.value, path)
+    // The read may have finished after another click already opened the same file.
+    if (fileTabs.value.some(t => t.path === data.path)) {
+      activeKey.value = fileTabs.value.find(t => t.path === data.path)!.key
+      return
+    }
     const tab: FileTab = {
       key: `${workspaceSessionId.value}:${path}`,
       sessionId: workspaceSessionId.value,
@@ -291,6 +300,8 @@ async function openFileInEditor(path: string) {
     activeKey.value = tab.key
   } catch {
     // A file that cannot be read simply does not open; the tree still shows it exists.
+  } finally {
+    opening.delete(path)
   }
 }
 
@@ -599,10 +610,19 @@ async function handleLogout() {
   gap: 6px;
   height: 100%;
   padding: 0 12px;
+  font: inherit;
   font-size: 12px;
-  color: var(--akiba-chat-text-muted);
+  background: transparent;
+  border: none;
   border-top: 1px solid transparent;
   border-right: 1px solid var(--vscode-panel-border);
+  color: var(--akiba-chat-text-faint);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--akiba-chat-hover);
+  color: var(--akiba-chat-text-muted);
 }
 
 .tab.active {
