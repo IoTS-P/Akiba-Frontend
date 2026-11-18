@@ -277,7 +277,10 @@
             No messages yet. Send a message to start the conversation.
           </div>
           <template v-for="m in visibleMessages" :key="m.messageId">
-            <div :class="['msg', m.role, { 'interrupted-partial': isInterruptedPartialMessage(m) }]">
+            <div :class="['msg', m.role, {
+                  'interrupted-partial': isInterruptedPartialMessage(m),
+                  'streaming-live': m.messageId === STREAMING_MESSAGE_ID,
+                }]">
             <!-- Wake-event separator: rendered as a divider line -->
             <!-- with a label, NOT as a chat bubble. -->
             <div v-if="isWakeEventMessage(m)" class="wake-separator">
@@ -312,7 +315,7 @@
             <template v-else>
             <div class="msg-header">
               <span class="role">{{ roleLabel(m) }}</span>
-              <span class="time">{{ formatTime(m.createdAt) }}{{ m.role === 'tool' ? toolDurationLabel(m) : '' }}<span v-if="isInterruptedPartialMessage(m)" class="interrupted-badge">⚠ interrupted partial</span></span>
+              <span class="time">{{ m.messageId === STREAMING_MESSAGE_ID ? (streamFinalized ? 'saving…' : 'streaming') : formatTime(m.createdAt) }}{{ m.role === 'tool' ? toolDurationLabel(m) : '' }}<span v-if="isInterruptedPartialMessage(m)" class="interrupted-badge">⚠ interrupted partial</span></span>
             </div>
             <!-- Special rendering for sub-agent invocations -->
             <div
@@ -378,7 +381,10 @@
                 </div>
               </details>
             </div>
-            <div v-else class="content" v-html="renderMarkdown(displayContent(m))"></div>
+            <div v-else class="content"
+                 v-html="m.messageId === STREAMING_MESSAGE_ID
+                   ? streamingContentHtml
+                   : renderMarkdown(displayContent(m))"></div>
             </template>
           </div>
             <div v-if="noticeAfter(m.messageId)" class="interruption-note">
@@ -450,7 +456,7 @@
                the partial content stays on screen with a dimmed
                background and a one-shot marker until the retry's new
                generation replaces it. -->
-          <div v-if="streamingHtml || streamingThinkHtml || streamThinkingActive || streamInterruptedError"
+          <div v-if="streamingThinkHtml || streamThinkingActive || streamInterruptedError"
                class="msg assistant streaming-live"
                :class="{ interrupted: !!streamInterruptedError }">
             <div class="msg-header">
@@ -3187,6 +3193,17 @@ const wakeSegments = computed(() => {
  * messages belonging to the selected wake segment, interleaved
  * with the wake-event separator for context.
  */
+/** Stands in for the assistant row the server has not written yet. */
+const STREAMING_MESSAGE_ID = -1
+
+/**
+ * The markdown the streaming text renders to.
+ *
+ * The typewriter renders behind the text on purpose: converting markdown on every token is
+ * what makes a long answer stutter.
+ */
+const streamingContentHtml = computed(() => streamingHtml.value || renderMarkdown(streamingText.value))
+
 const visibleMessages = computed(() => {
   // `__llm_progress__` heartbeat rows are internal debug signals:
   // they exist so the backend can prove an LLM call is alive, but
@@ -3205,7 +3222,18 @@ const visibleMessages = computed(() => {
         // older/later wake separators appear in the wrong filtered view.
         return messages.value.filter(m => seg.messageIds.has(m.messageId))
       })()
-  return base.filter(m => !isLLMProgressMessage(m) && !isRetryInstructionMessage(m))
+  const rows = base.filter(m => !isLLMProgressMessage(m) && !isRetryInstructionMessage(m))
+  if (!streamingText.value) return rows
+  // The pending answer is the next row, not a separate box: the stored row lands in this
+  // exact slot, so the text does not move when it arrives.
+  const pending: AgentMessage = {
+    messageId: STREAMING_MESSAGE_ID,
+    messageIndex: Number.MAX_SAFE_INTEGER,
+    role: 'assistant',
+    content: streamingText.value,
+    createdAt: null,
+  }
+  return [...rows, pending]
 })
 
 // Start/stop the 1-second tick timer based on whether the latest
