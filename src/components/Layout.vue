@@ -91,37 +91,47 @@
     <!-- Editor area: the tab bar, the page, nothing below it. -->
     <main class="editor">
       <div class="tab-bar">
-        <div class="tab active" :title="currentRoute">
+        <button class="tab" :class="{ active: activeKey === 'view' }" @click="activeKey = 'view'">
           <span class="tab-icon">{{ currentViewIcon }}</span>
           <span class="tab-label">{{ currentRoute }}</span>
-        </div>
+        </button>
+        <button
+          v-for="t in fileTabs"
+          :key="t.key"
+          class="tab"
+          :class="{ active: activeKey === t.key }"
+          :title="t.path"
+          @click="activeKey = t.key"
+          @auxclick.middle.prevent="closeTab(t)"
+        >
+          <span v-if="t.dirty" class="tab-dot" title="Unsaved changes"></span>
+          <span class="tab-label">{{ t.title }}</span>
+          <span class="tab-close" title="Close" @click.stop="closeTab(t)">×</span>
+        </button>
         <div class="tab-spacer"></div>
         <SystemStatus />
       </div>
-      <!-- A file opens over the page, not in it: the page behind stays where it was. -->
-      <div v-if="openFile" class="file-overlay">
-        <div class="file-bar">
-          <span class="file-path">{{ openFile.path }}</span>
-          <span v-if="openFile.binary" class="file-note">binary file — download to inspect</span>
-          <button class="bar-btn" :disabled="openFile.binary" @click="saveFile">Save</button>
-          <button class="bar-btn" @click="downloadOpenFile">Download</button>
-          <button class="bar-btn" @click="openFile = null">Close</button>
-        </div>
-        <div class="file-body">
-          <WorkspaceEditor
-            v-if="!openFile.binary"
-            v-model="openFile.content"
-            :language="openFile.language"
-            @save="saveFile"
-          />
-          <div v-else class="file-note-block">
-            This file is not text. Use Download and open it locally.
-          </div>
-        </div>
+
+      <div v-show="activeKey === 'view'" class="content">
+        <router-view />
       </div>
 
-      <div class="content">
-        <router-view />
+      <div
+        v-for="t in fileTabs"
+        v-show="activeKey === t.key"
+        :key="t.key"
+        class="file-body"
+      >
+        <WorkspaceEditor
+          v-if="!t.binary"
+          :model-value="t.content"
+          :language="t.language"
+          @update:model-value="onEdit(t, $event)"
+          @save="saveTab(t)"
+        />
+        <div v-else class="file-note-block">
+          This file is not text. Download it from the workspace tree to inspect it.
+        </div>
       </div>
     </main>
   </div>
@@ -230,14 +240,20 @@ function startSplitDrag(e: PointerEvent) {
   window.addEventListener('pointerup', up)
 }
 
-interface OpenFile {
+interface FileTab {
+  key: string
+  sessionId: string
   path: string
+  title: string
   content: string
   language: string
   binary: boolean
+  dirty: boolean
 }
 
-const openFile = ref<OpenFile | null>(null)
+const fileTabs = ref<FileTab[]>([])
+const activeKey = ref<string>('view')
+const saveTimers = new Map<string, number>()
 
 /** Monaco needs a language id, not an extension; common ones are enough here. */
 function languageOf(path: string): string {
@@ -254,27 +270,66 @@ function languageOf(path: string): string {
 
 async function openFileInEditor(path: string) {
   if (!workspaceSessionId.value) return
+  const existing = fileTabs.value.find(t => t.path === path)
+  if (existing) {
+    activeKey.value = existing.key
+    return
+  }
   try {
     const { data } = await workspaceApi.readFile(workspaceSessionId.value, path)
-    openFile.value = {
+    const tab: FileTab = {
+      key: `${workspaceSessionId.value}:${path}`,
+      sessionId: workspaceSessionId.value,
       path: data.path,
+      title: data.path.split('/').pop() || data.path,
       content: data.content,
       language: languageOf(data.path),
       binary: data.binary,
+      dirty: false,
     }
+    fileTabs.value.push(tab)
+    activeKey.value = tab.key
   } catch {
-    openFile.value = null
+    // A file that cannot be read simply does not open; the tree still shows it exists.
   }
 }
 
-async function saveFile() {
-  if (!openFile.value || !workspaceSessionId.value) return
-  await workspaceApi.writeFile(workspaceSessionId.value, openFile.value.path, openFile.value.content)
+/**
+ * Typing schedules a save; the dot in the tab is the only thing that reports it.
+ *
+ * There is no Save button on purpose: a workspace file is a note, not a document, and losing it
+ * because someone closed a tab is worse than writing it a second time.
+ */
+function onEdit(tab: FileTab, content: string) {
+  tab.content = content
+  tab.dirty = true
+  const pending = saveTimers.get(tab.key)
+  if (pending) clearTimeout(pending)
+  saveTimers.set(tab.key, window.setTimeout(() => void saveTab(tab), 700))
 }
 
-function downloadOpenFile() {
-  if (!openFile.value || !workspaceSessionId.value) return
-  window.open(workspaceApi.downloadUrl(workspaceSessionId.value, openFile.value.path), '_blank')
+async function saveTab(tab: FileTab) {
+  const pending = saveTimers.get(tab.key)
+  if (pending) {
+    clearTimeout(pending)
+    saveTimers.delete(tab.key)
+  }
+  try {
+    await workspaceApi.writeFile(tab.sessionId, tab.path, tab.content)
+    tab.dirty = false
+  } catch {
+    // Leave it marked dirty: an unsaved change must not look saved.
+  }
+}
+
+async function closeTab(tab: FileTab) {
+  if (tab.dirty) await saveTab(tab)
+  const index = fileTabs.value.findIndex(t => t.key === tab.key)
+  if (index === -1) return
+  fileTabs.value.splice(index, 1)
+  if (activeKey.value === tab.key) {
+    activeKey.value = fileTabs.value[Math.min(index, fileTabs.value.length - 1)]?.key ?? 'view'
+  }
 }
 
 /** The conversation whose workspace is open below the session tree, if any. */
@@ -560,32 +615,6 @@ async function handleLogout() {
   flex: 1;
 }
 
-.file-overlay {
-  position: absolute;
-  inset: 36px 0 0 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--vscode-editor-background);
-  z-index: 30;
-}
-
-.file-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  font-size: 12px;
-}
-
-.file-path {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vscode-editor-foreground);
-}
-
 .file-note,
 .file-note-block,
 .bar-btn,
@@ -598,23 +627,30 @@ async function handleLogout() {
   font-size: 13px;
 }
 
-.bar-btn {
-  background: transparent;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: var(--akiba-radius-sm);
-  padding: 2px 10px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.bar-btn:hover {
-  background: var(--akiba-chat-hover);
-  color: var(--vscode-editor-foreground);
-}
-
 .file-body {
+  position: absolute;
+  inset: 36px 0 0 0;
   flex: 1;
   min-height: 0;
+}
+
+.tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--akiba-warning-text);
+  flex: 0 0 auto;
+}
+
+.tab-close {
+  opacity: 0.45;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  background: var(--akiba-chat-hover);
 }
 
 .content {
