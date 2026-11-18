@@ -63,7 +63,7 @@
       <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
-      <nav v-if="!isAgentActivity" class="nav">
+      <nav v-if="!isAgentActivity && !isProjectsActivity" class="nav">
         <button
           v-for="item in filteredViews"
           :key="item.path"
@@ -96,10 +96,6 @@
     <!-- Editor area: the tab bar, the page, nothing below it. -->
     <main class="editor">
       <div class="tab-bar">
-        <button class="tab" :class="{ active: activeKey === 'view' }" @click="activeKey = 'view'">
-          <span class="tab-icon">{{ currentViewIcon }}</span>
-          <span class="tab-label">{{ currentRoute }}</span>
-        </button>
         <button
           v-for="t in fileTabs"
           :key="t.key"
@@ -384,7 +380,6 @@ function openWorkspace(id: string) {
 }
 
 const currentRoute = computed(() => allViews.value.find(v => isActive(v.path))?.title ?? 'Akiba')
-const currentViewIcon = computed(() => allViews.value.find(v => isActive(v.path))?.icon ?? '◆')
 
 function switchInstance() {
   instanceStore.clear()
