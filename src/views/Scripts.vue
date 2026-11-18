@@ -9,7 +9,7 @@
         <span class="saved" :class="{ dirty }">{{ dirty ? 'Saving…' : 'Saved' }}</span>
       </div>
       <div class="body">
-        <WorkspaceEditor v-model="code" :language="script?.language || 'kotlin'" @save="save" />
+        <WorkspaceEditor v-model="code" :language="script?.language || 'kotlin'" :uri="`akiba://script/${activeId}`" @save="save" />
       </div>
     </template>
   </div>

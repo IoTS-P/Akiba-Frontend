@@ -119,18 +119,15 @@
         <router-view />
       </div>
 
-      <div
-        v-for="t in fileTabs"
-        v-show="activeKey === t.key"
-        :key="t.key"
-        class="file-body"
-      >
+      <!-- One editor serves every tab; a tab is a document, not an editor. -->
+      <div v-if="activeFile" class="file-body">
         <WorkspaceEditor
-          v-if="!t.binary"
-          :model-value="t.content"
-          :language="t.language"
-          @update:model-value="onEdit(t, $event)"
-          @save="saveTab(t)"
+          v-if="!activeFile.binary"
+          :model-value="activeFile.content"
+          :language="activeFile.language"
+          :uri="activeFile.uri"
+          @update:model-value="onEdit(activeFile, $event)"
+          @save="saveTab(activeFile)"
         />
         <div v-else class="file-note-block">
           This file is not text. Download it from the workspace tree to inspect it.
@@ -263,6 +260,8 @@ function startSplitDrag(e: PointerEvent) {
 
 interface FileTab {
   key: string
+  /** Stable monaco identity: the same file opened twice shares one model. */
+  uri: string
   scope: WorkspaceScope
   path: string
   title: string
@@ -273,6 +272,7 @@ interface FileTab {
 }
 
 const fileTabs = ref<FileTab[]>([])
+const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.value) ?? null)
 // Choosing another activity is a request to see that activity: a file tab must not keep the
 // editor hostage while the sidebar has already moved on.
 watch(() => route.fullPath, () => {
@@ -340,6 +340,7 @@ async function openInScope(scope: WorkspaceScope | null, path: string) {
     }
     const tab: FileTab = {
       key: `${scope.kind}:${scope.kind === 'session' ? scope.sessionId : scope.project + scope.program}:${path}`,
+      uri: `akiba://${scope.kind}/${scope.kind === 'session' ? scope.sessionId : scope.project + '/' + scope.program}/${path}`,
       scope,
       path: data.path,
       title: data.path.split('/').pop() || data.path,
