@@ -1,65 +1,76 @@
 <template>
   <div class="layout">
+    <!-- Activity bar: which family of things you are looking at. -->
+    <nav class="activity-bar" aria-label="Activities">
+      <button
+        v-for="item in primaryViews"
+        :key="item.path"
+        class="activity"
+        :class="{ active: isActive(item.path) }"
+        :title="item.title"
+        :aria-label="item.title"
+        @click="go(item.path)"
+      >
+        <span class="activity-icon">{{ item.icon }}</span>
+      </button>
+      <div class="activity-spacer"></div>
+      <button
+        v-if="utilityView"
+        class="activity"
+        :class="{ active: isActive(utilityView.path) }"
+        :title="utilityView.title"
+        :aria-label="utilityView.title"
+        @click="go(utilityView.path)"
+      >
+        <span class="activity-icon">{{ utilityView.icon }}</span>
+      </button>
+    </nav>
+
+    <!-- Sidebar: the list of things in the active family. -->
     <aside class="sidebar">
-      <div class="logo">Akiba</div>
+      <div class="sidebar-header">
+        <span class="sidebar-title">{{ currentRoute }}</span>
+      </div>
+      <div class="sidebar-search">
+        <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
+      </div>
       <nav class="nav">
-        <router-link to="/" class="nav-item">
-          <span class="icon">📊</span>
-          <span>Dashboard</span>
-        </router-link>
-        <router-link to="/instances" class="nav-item">
-          <span class="icon">🗄️</span>
-          <span>Instances</span>
-        </router-link>
-        <router-link to="/scripts" class="nav-item">
-          <span class="icon">📜</span>
-          <span>Scripts</span>
-        </router-link>
-        <router-link to="/agent" class="nav-item">
-          <span class="icon">💬</span>
-          <span>Agent</span>
-        </router-link>
-        <router-link to="/projects" class="nav-item">
-          <span class="icon">🗂️</span>
-          <span>Projects</span>
-        </router-link>
-        <router-link to="/files" class="nav-item">
-          <span class="icon">📁</span>
-          <span>Files</span>
-        </router-link>
-        <router-link to="/skills" class="nav-item">
-          <span class="icon">🧩</span>
-          <span>Skills</span>
-        </router-link>
-        <router-link to="/modules" class="nav-item">
-          <span class="icon">📦</span>
-          <span>Modules</span>
-        </router-link>
-        <router-link to="/settings" class="nav-item">
-          <span class="icon">⚙️</span>
-          <span>Settings</span>
-        </router-link>
+        <button
+          v-for="item in filteredViews"
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: isActive(item.path) }"
+          @click="go(item.path)"
+        >
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-label">{{ item.title }}</span>
+        </button>
       </nav>
       <div class="sidebar-footer">
-        <div class="instance-info">
-          <div class="label">Instance</div>
-          <div class="value" :title="instanceStore.selected || ''">
+        <div class="instance">
+          <span class="instance-label">Instance</span>
+          <span class="instance-value" :title="instanceStore.selected || ''">
             {{ instanceStore.selected || '—' }}
-          </div>
-          <button class="switch-btn" @click="switchInstance">Switch</button>
+          </span>
+          <button class="link-btn" @click="switchInstance">Switch</button>
         </div>
-        <div class="user-info">
-          <span>{{ authStore.user?.username }}</span>
+        <div class="account">
+          <span class="account-name">{{ authStore.user?.username }}</span>
+          <button class="link-btn" @click="handleLogout">Logout</button>
         </div>
-        <button @click="handleLogout" class="logout-btn">Logout</button>
       </div>
     </aside>
-    <main class="main-content">
-      <header class="header">
-        <h1>{{ currentRoute }}</h1>
-        <!-- Always visible, whichever page is open. -->
+
+    <!-- Editor area: the tab bar, the page, nothing below it. -->
+    <main class="editor">
+      <div class="tab-bar">
+        <div class="tab active" :title="currentRoute">
+          <span class="tab-icon">{{ currentViewIcon }}</span>
+          <span class="tab-label">{{ currentRoute }}</span>
+        </div>
+        <div class="tab-spacer"></div>
         <SystemStatus />
-      </header>
+      </div>
       <div class="content">
         <router-view />
       </div>
@@ -68,30 +79,60 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
+
+interface ViewItem {
+  path: string
+  title: string
+  icon: string
+}
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const instanceStore = useInstanceStore()
 
-const currentRoute = computed(() => {
-  const names: Record<string, string> = {
-    dashboard: 'Dashboard',
-    instances: 'Instances',
-    scripts: 'Scripts',
-    agent: 'Agent',
-    projects: 'Ghidra Projects',
-    files: 'Files',
-    skills: 'Skills',
-    settings: 'Settings'
-  }
-  return names[route.name as string] || 'Akiba'
+/**
+ * The activities Akiba has, in the order they are worth reaching for.
+ *
+ * Each one owns the sidebar while it is active; Settings sits apart at the bottom, the way
+ * an editor keeps its settings away from its work.
+ */
+const primaryViews: ViewItem[] = [
+  { path: '/agent', title: 'Agent', icon: '💬' },
+  { path: '/projects', title: 'Ghidra Projects', icon: '🗂️' },
+  { path: '/files', title: 'Files', icon: '📁' },
+  { path: '/instances', title: 'Instances', icon: '🗄️' },
+  { path: '/scripts', title: 'Scripts', icon: '📜' },
+  { path: '/skills', title: 'Skills', icon: '🧩' },
+  { path: '/modules', title: 'Modules', icon: '📦' },
+  { path: '/', title: 'Dashboard', icon: '📊' },
+]
+
+const utilityView: ViewItem = { path: '/settings', title: 'Settings', icon: '⚙️' }
+
+const allViews = computed(() => [...primaryViews, utilityView])
+const filter = ref('')
+
+const filteredViews = computed(() => {
+  const q = filter.value.trim().toLowerCase()
+  return q ? allViews.value.filter(v => v.title.toLowerCase().includes(q)) : allViews.value
 })
+
+function isActive(path: string): boolean {
+  return path === '/' ? route.path === '/' : route.path.startsWith(path)
+}
+
+function go(path: string) {
+  router.push(path)
+}
+
+const currentRoute = computed(() => allViews.value.find(v => isActive(v.path))?.title ?? 'Akiba')
+const currentViewIcon = computed(() => allViews.value.find(v => isActive(v.path))?.icon ?? '◆')
 
 function switchInstance() {
   instanceStore.clear()
@@ -110,140 +151,217 @@ async function handleLogout() {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
 }
 
-.sidebar {
-  width: 220px;
-  min-width: 220px;
-  background: #1a1a2e;
-  color: #fff;
+/* ---- activity bar ------------------------------------------------------ */
+.activity-bar {
+  width: 48px;
+  min-width: 48px;
   display: flex;
   flex-direction: column;
-  padding: 20px 0;
-  height: 100vh;
-  position: sticky;
-  top: 0;
-  overflow-y: auto;
+  align-items: center;
+  padding: 8px 0;
+  background: var(--akiba-chat-surface);
+  border-right: 1px solid var(--vscode-panel-border);
 }
 
-.logo {
-  font-size: 24px;
-  font-weight: bold;
-  padding: 0 20px 30px;
-  color: #e94560;
+.activity {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--akiba-radius-sm);
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.activity:hover {
+  opacity: 1;
+  background: var(--akiba-chat-hover);
+}
+
+.activity.active {
+  opacity: 1;
+  border-left-color: var(--vscode-focusBorder);
+  background: var(--akiba-chat-hover);
+}
+
+.activity-icon {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.activity-spacer {
+  flex: 1;
+}
+
+/* ---- sidebar ----------------------------------------------------------- */
+.sidebar {
+  width: 260px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  background: var(--akiba-chat-surface);
+  border-right: 1px solid var(--vscode-panel-border);
+}
+
+.sidebar-header {
+  padding: 10px 14px 6px;
+}
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.sidebar-search {
+  padding: 0 10px 8px;
+}
+
+.sidebar-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .nav {
   flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  color: #a0a0a0;
-  text-decoration: none;
-  transition: all 0.2s;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--akiba-chat-text-muted);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
 }
 
-.nav-item:hover,
-.nav-item.router-link-active {
-  background: #16213e;
-  color: #e94560;
+.nav-item:hover {
+  background: var(--akiba-chat-hover);
+  color: var(--vscode-editor-foreground);
 }
 
-.icon {
-  font-size: 18px;
+.nav-item.active {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+  color: var(--vscode-editor-foreground);
+}
+
+.nav-icon {
+  width: 18px;
+  text-align: center;
 }
 
 .sidebar-footer {
-  padding: 20px;
-  border-top: 1px solid #333;
+  border-top: 1px solid var(--vscode-panel-border);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
 }
 
-.user-info {
-  font-size: 14px;
-  margin-bottom: 10px;
-  color: #a0a0a0;
+.instance,
+.account {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
 }
 
-.instance-info {
-  margin-bottom: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #2a2a3e;
-}
-.instance-info .label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+.instance-label {
   color: var(--akiba-chat-text-faint);
-  margin-bottom: 4px;
 }
-.instance-info .value {
-  font-size: 13px;
-  color: #fff;
-  font-weight: 500;
-  margin-bottom: 8px;
+
+.instance-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-editor-foreground);
+}
+
+.account-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.switch-btn {
-  width: 100%;
-  padding: 6px;
+
+.link-btn {
   background: transparent;
-  color: #a0a0a0;
-  border: 1px solid #3a3a4e;
-  border-radius: 4px;
+  border: none;
+  color: var(--akiba-info-text);
   cursor: pointer;
+  padding: 0;
   font-size: 12px;
 }
-.switch-btn:hover {
-  color: #e94560;
-  border-color: #e94560;
+
+.link-btn:hover {
+  text-decoration: underline;
 }
 
-.logout-btn {
-  width: 100%;
-  padding: 10px;
-  background: #e94560;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.logout-btn:hover {
-  background: #d63850;
-}
-
-.main-content {
+/* ---- editor area ------------------------------------------------------- */
+.editor {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  min-width: 0;
 }
 
-.header {
+.tab-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
-  padding: 14px 30px;
-  border-bottom: 1px solid #e0e0e0;
+  height: 36px;
+  min-height: 36px;
+  background: var(--akiba-chat-surface);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding: 0 8px;
+  gap: 8px;
 }
 
-.header h1 {
-  font-size: 24px;
-  font-weight: 600;
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--akiba-chat-text-muted);
+  border-top: 1px solid transparent;
+  border-right: 1px solid var(--vscode-panel-border);
+}
+
+.tab.active {
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  border-top-color: var(--vscode-focusBorder);
+}
+
+.tab-spacer {
+  flex: 1;
 }
 
 .content {
   flex: 1;
-  padding: 30px;
-  overflow-y: auto;
+  overflow: auto;
+  padding: 0;
 }
 </style>

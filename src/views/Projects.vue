@@ -648,7 +648,7 @@ async function submitCreateProject() {
 }
 .project-name {
   font-weight: 500;
-  color: #1a1a2e;
+  color: var(--vscode-editor-foreground);
 }
 .actions-cell {
   display: flex;
@@ -724,7 +724,7 @@ async function submitCreateProject() {
 .modal-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #1a1a2e;
+  color: var(--vscode-editor-foreground);
 }
 .modal-close {
   background: none;

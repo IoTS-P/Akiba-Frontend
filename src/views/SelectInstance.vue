@@ -162,7 +162,7 @@ async function createInstance() {
 
 .title {
   font-size: 26px;
-  color: #1a1a2e;
+  color: var(--vscode-editor-foreground);
   margin-bottom: 6px;
 }
 

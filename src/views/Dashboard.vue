@@ -266,7 +266,7 @@ async function loadRecentScripts() {
 .stat-value {
   font-size: 28px;
   font-weight: 700;
-  color: #1a1a2e;
+  color: var(--vscode-editor-foreground);
 }
 
 .stat-label {
@@ -290,7 +290,7 @@ async function loadRecentScripts() {
 .section h2 {
   font-size: 18px;
   margin-bottom: 16px;
-  color: #1a1a2e;
+  color: var(--vscode-editor-foreground);
 }
 
 .empty {

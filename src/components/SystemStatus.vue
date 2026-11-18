@@ -79,7 +79,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 0.72rem;
-  color: #8a8f98;
+  color: var(--akiba-chat-text-faint);
 }
 
 .gauge-label {
@@ -97,21 +97,22 @@ onUnmounted(() => {
 .gauge-fill {
   display: block;
   height: 100%;
-  background: #4a7dff;
+  background: var(--akiba-info-text);
   transition: width 0.4s ease;
 }
 
 .gauge.warn .gauge-fill {
-  background: #e0703a;
+  background: var(--akiba-warning-text);
 }
 
 .gauge.warn .gauge-value {
-  color: #c0392b;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
 }
 
 .gauge-value {
   min-width: 30px;
   font-variant-numeric: tabular-nums;
-  color: #5a6068;
+  color: var(--vscode-editor-foreground);
 }
 </style>
