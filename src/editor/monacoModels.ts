@@ -9,15 +9,25 @@ import * as monaco from 'monaco-editor'
  */
 const models = new Map<string, monaco.editor.ITextModel>()
 
-export function modelFor(uri: string, language: string, initial: string): monaco.editor.ITextModel {
+export function modelFor(
+  uri: string,
+  language: string,
+  initial: string,
+): { model: monaco.editor.ITextModel; created: boolean } {
   const existing = models.get(uri)
   if (existing && !existing.isDisposed()) {
     monaco.editor.setModelLanguage(existing, language)
-    return existing
+    return { model: existing, created: false }
   }
   const model = monaco.editor.createModel(initial, language, monaco.Uri.parse(uri))
   models.set(uri, model)
-  return model
+  return { model, created: true }
+}
+
+/** The text currently held for [uri], including changes not yet saved. */
+export function textOf(uri: string): string | null {
+  const model = models.get(uri)
+  return model && !model.isDisposed() ? model.getValue() : null
 }
 
 /** Forget a document: the text is already saved or the tab is gone for good. */

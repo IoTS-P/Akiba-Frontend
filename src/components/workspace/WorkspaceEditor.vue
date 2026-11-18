@@ -66,11 +66,10 @@ onMounted(() => {
 function bind(uri: string, language: string, initial: string) {
   if (!editor || !uri) return
   currentUri = uri
-  const model = modelFor(uri, language, initial)
-  if (editor.getModel() !== model) {
-    editor.setModel(model)
-  }
-  if (model.getValue() !== initial) {
+  const { model, created } = modelFor(uri, language, initial)
+  if (editor.getModel() !== model) editor.setModel(model)
+  // Only a brand new document takes the text handed in; an existing one may hold unsaved edits.
+  if (created && model.getValue() !== initial) {
     suppress = true
     model.setValue(initial)
     suppress = false

@@ -9,7 +9,12 @@
         <span class="saved" :class="{ dirty }">{{ dirty ? 'Saving…' : 'Saved' }}</span>
       </div>
       <div class="body">
-        <WorkspaceEditor v-model="code" :language="script?.language || 'kotlin'" :uri="`akiba://script/${activeId}`" @save="save" />
+        <WorkspaceEditor
+          v-model="code"
+          :language="script?.language || 'kotlin'"
+          :uri="`akiba://script/${activeId}`"
+          @save="save"
+        />
       </div>
     </template>
   </div>
@@ -20,6 +25,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
+import { textOf } from '@/editor/monacoModels'
 import type { Script } from '@/types'
 
 const route = useRoute()
@@ -33,12 +39,11 @@ const activeId = computed(() => Number(route.query.id) || null)
 
 async function load(id: number) {
   loading.value = true
-  script.value = null
-  code.value = ''
   try {
     const { data } = await scriptApi.get(id)
     script.value = data
-    code.value = data.code ?? ''
+    // A model that is already open may hold edits newer than the server's copy.
+    code.value = textOf(`akiba://script/${id}`) ?? data.code ?? ''
     dirty.value = false
   } catch {
     script.value = null
@@ -48,8 +53,13 @@ async function load(id: number) {
 }
 
 let timer: number | undefined
-watch(code, () => {
+watch(code, value => {
   if (loading.value || !script.value) return
+  // Loading the same text is not an edit.
+  if (value === (script.value.code ?? '')) {
+    dirty.value = false
+    return
+  }
   dirty.value = true
   window.clearTimeout(timer)
   timer = window.setTimeout(() => void save(), 800)
