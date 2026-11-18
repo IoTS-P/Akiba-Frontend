@@ -13,7 +13,7 @@
         class="row"
         :class="{ active: s.id === activeId }"
         :title="s.description || s.name"
-        @click="open(s.id)"
+        @click="open(s.id, s.name)"
         @contextmenu.prevent="menu($event, s)"
       >
         <span class="id">{{ s.id }}</span>
@@ -40,19 +40,17 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { scriptApi } from '@/services/api'
 import type { Script } from '@/types'
 
-const route = useRoute()
-const router = useRouter()
+const emit = defineEmits<{ open: [id: number, name: string] }>()
 
 const scripts = ref<Script[]>([])
 const query = ref('')
 const error = ref('')
 const ctx = reactive({ show: false, x: 0, y: 0, script: null as Script | null })
 
-const activeId = computed(() => Number(route.query.id) || null)
+const activeId = ref<number | null>(null)
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
   return q ? scripts.value.filter(s => s.name.toLowerCase().includes(q)) : scripts.value
@@ -67,8 +65,9 @@ async function load() {
   }
 }
 
-function open(id: number) {
-  router.push({ path: '/scripts', query: { id: String(id) } })
+function open(id: number, name: string) {
+  activeId.value = id
+  emit('open', id, name)
 }
 
 function menu(ev: MouseEvent, script: Script) {
@@ -118,7 +117,7 @@ async function remove() {
   try {
     await scriptApi.delete(script.id)
     scripts.value = scripts.value.filter(s => s.id !== script.id)
-    if (activeId.value === script.id) router.push('/scripts')
+    if (activeId.value === script.id) activeId.value = null
   } catch {
     error.value = 'Delete failed.'
   }

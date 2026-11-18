@@ -38,7 +38,7 @@
           @open-workspace="openProgramWorkspace"
         />
         <FilesSidebar v-else-if="isFilesActivity" />
-        <ScriptsSidebar v-else-if="isScriptsActivity" />
+        <ScriptsSidebar v-else-if="isScriptsActivity" @open="openScriptTab" />
         <AgentSidebar
           v-else-if="isAgentActivity"
           :active-id="activeSessionId"
@@ -111,12 +111,35 @@
           <span class="tab-label">{{ t.title }}</span>
           <span class="tab-close" title="Close" @click.stop="closeTab(t)">×</span>
         </button>
+        <button
+          v-for="t in scriptTabs"
+          :key="t.key"
+          class="tab"
+          :class="{ active: activeKey === t.key }"
+          :title="t.title"
+          @click="activeKey = t.key"
+          @auxclick.middle.prevent="closeScriptTab(t)"
+        >
+          <span class="tab-icon">📜</span>
+          <span class="tab-label">{{ t.title }}</span>
+          <span class="tab-close" title="Close" @click.stop="closeScriptTab(t)">×</span>
+        </button>
         <div class="tab-spacer"></div>
         <SystemStatus />
       </div>
 
       <div v-show="activeKey === 'view'" class="content">
         <router-view />
+      </div>
+
+      <div v-if="activeScript" class="file-body">
+        <WorkspaceEditor
+          ref="editorRef"
+          v-model="scriptText"
+          language="kotlin"
+          :uri="activeScript.uri"
+          @save="saveScript"
+        />
       </div>
 
       <!-- One editor serves every tab; a tab is a document, not an editor. -->
@@ -138,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
@@ -149,6 +172,8 @@ import FilesSidebar from '@/components/files/FilesSidebar.vue'
 import ScriptsSidebar from '@/components/scripts/ScriptsSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
+import { scriptApi } from '@/services/api'
+import { textOf } from '@/editor/monacoModels'
 import { workspaceApi, type WorkspaceScope } from '@/services/workspace'
 
 interface ViewItem {
@@ -271,12 +296,86 @@ interface FileTab {
   dirty: boolean
 }
 
+interface ScriptTab {
+  key: string
+  id: number
+  title: string
+  uri: string
+}
+
 const fileTabs = ref<FileTab[]>([])
+const scriptTabs = ref<ScriptTab[]>([])
+const scriptText = ref('')
+const editorRef = ref<{ setText: (t: string) => void } | null>(null)
 const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.value) ?? null)
+const activeScript = computed(() => scriptTabs.value.find(t => t.key === activeKey.value) ?? null)
+
+/** A script opens in the same tab strip as a file; the editor does not care which it is. */
+async function openScriptTab(id: number, name: string) {
+  const key = `script:${id}`
+  const existing = scriptTabs.value.find(t => t.key === key)
+  if (existing) {
+    activeKey.value = key
+    return
+  }
+  const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}` }
+  scriptTabs.value.push(tab)
+  activeKey.value = key
+  await loadScriptText(id)
+}
+
+async function loadScriptText(id: number) {
+  try {
+    const { data } = await scriptApi.get(id)
+    scriptText.value = textOf(`akiba://script/${id}`) ?? data.code ?? ''
+    await nextTick()
+    editorRef.value?.setText(scriptText.value)
+  } catch {
+    scriptText.value = ''
+  }
+}
+
+async function saveScript() {
+  const tab = activeScript.value
+  if (!tab) return
+  try {
+    const { data } = await scriptApi.get(tab.id)
+    await scriptApi.update(tab.id, {
+      name: data.name,
+      description: data.description ?? '',
+      code: scriptText.value,
+      language: data.language ?? 'kotlin',
+      saveResult: data.saveResult ?? true,
+      maxOutputSize: data.maxOutputSize ?? 10485760,
+    })
+  } catch {
+    // Leave the text as it is: a failed write must not look saved.
+  }
+}
+
+let scriptTimer: number | undefined
+watch(scriptText, () => {
+  if (!activeScript.value) return
+  window.clearTimeout(scriptTimer)
+  const forKey = activeScript.value.key
+  scriptTimer = window.setTimeout(() => {
+    if (activeKey.value === forKey) void saveScript()
+  }, 2500)
+})
+
+function closeScriptTab(tab: ScriptTab) {
+  void saveScript()
+  scriptTabs.value = scriptTabs.value.filter(t => t.key !== tab.key)
+  if (activeKey.value === tab.key) activeKey.value = 'view'
+}
 // Choosing another activity is a request to see that activity: a file tab must not keep the
 // editor hostage while the sidebar has already moved on.
 watch(() => route.fullPath, () => {
   activeKey.value = 'view'
+})
+
+watch(activeScript, tab => {
+  if (tab) void loadScriptText(tab.id)
 })
 const activeKey = ref<string>('view')
 const saveTimers = new Map<string, number>()
