@@ -22,33 +22,54 @@ export interface WorkspaceFile {
   modified: number
 }
 
-const base = (sessionId: string) => `/agent/sessions/${encodeURIComponent(sessionId)}/workspace`
+/**
+ * A workspace belongs either to a conversation or to a program; the routes differ, the rest of
+ * the shape does not.
+ */
+export type WorkspaceScope =
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'program'; project: string; program: string }
+
+function baseOf(scope: WorkspaceScope): string {
+  if (scope.kind === 'session') {
+    return `/agent/sessions/${encodeURIComponent(scope.sessionId)}/workspace`
+  }
+  return `/projects/${encodeURIComponent(scope.project)}/workspace`
+}
+
+/** Program requests name the program in the query; session requests need nothing extra. */
+function extra(scope: WorkspaceScope): Record<string, string> {
+  return scope.kind === 'program' ? { program: scope.program } : {}
+}
 
 export const workspaceApi = {
-  tree: (sessionId: string, path = '') =>
-    api.get<{ path: string; entries: WorkspaceEntry[] }>(`${base(sessionId)}/tree`, { params: { path } }),
+  tree: (scope: WorkspaceScope, path = '') =>
+    api.get<{ path: string; entries: WorkspaceEntry[] }>(
+      `${baseOf(scope)}/tree`, { params: { path, ...extra(scope) } }),
 
-  readFile: (sessionId: string, path: string) =>
-    api.get<WorkspaceFile>(`${base(sessionId)}/file`, { params: { path } }),
+  readFile: (scope: WorkspaceScope, path: string) =>
+    api.get<WorkspaceFile>(`${baseOf(scope)}/file`, { params: { path, ...extra(scope) } }),
 
-  writeFile: (sessionId: string, path: string, content: string) =>
+  writeFile: (scope: WorkspaceScope, path: string, content: string) =>
     api.put<{ status: string; path: string; size: number }>(
-      `${base(sessionId)}/file`, content,
-      { params: { path }, headers: { 'Content-Type': 'text/plain' } },
+      `${baseOf(scope)}/file`, content,
+      { params: { path, ...extra(scope) }, headers: { 'Content-Type': 'text/plain' } },
     ),
 
-  upload: (sessionId: string, path: string, file: File) => {
+  upload: (scope: WorkspaceScope, path: string, file: File) => {
     const form = new FormData()
     form.append('file', file, file.name)
     return api.post<{ status: string; files: string[] }>(
-      `${base(sessionId)}/upload`, form,
-      { params: { path }, headers: { 'Content-Type': 'multipart/form-data' } },
+      `${baseOf(scope)}/upload`, form,
+      { params: { path, ...extra(scope) }, headers: { 'Content-Type': 'multipart/form-data' } },
     )
   },
 
-  deleteEntry: (sessionId: string, path: string) =>
-    api.delete<{ status: string }>(`${base(sessionId)}/entry`, { params: { path } }),
+  deleteEntry: (scope: WorkspaceScope, path: string) =>
+    api.delete<{ status: string }>(`${baseOf(scope)}/entry`, { params: { path, ...extra(scope) } }),
 
-  downloadUrl: (sessionId: string, path: string) =>
-    `${base(sessionId)}/download?path=${encodeURIComponent(path)}`,
+  downloadUrl: (scope: WorkspaceScope, path: string) => {
+    const params = new URLSearchParams({ path, ...extra(scope) })
+    return `${baseOf(scope)}/download?${params.toString()}`
+  },
 }

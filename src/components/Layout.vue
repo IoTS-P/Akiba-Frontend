@@ -48,7 +48,7 @@
         ></div>
         <WorkspacePanel
           v-if="workspaceSessionId"
-          :session-id="workspaceSessionId"
+          :scope="sessionScope"
           class="split-bottom"
           @open-file="openFileInEditor"
           :style="{ flexBasis: splitPercent + '%' }"
@@ -146,7 +146,7 @@ import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
-import { workspaceApi } from '@/services/workspace'
+import { workspaceApi, type WorkspaceScope } from '@/services/workspace'
 
 interface ViewItem {
   path: string
@@ -275,6 +275,11 @@ function languageOf(path: string): string {
   return map[ext] ?? 'plaintext'
 }
 
+const sessionScope = computed<WorkspaceScope>(() => ({
+  kind: 'session',
+  sessionId: workspaceSessionId.value ?? '',
+}))
+
 async function openFileInEditor(path: string) {
   if (!workspaceSessionId.value) return
   const existing = fileTabs.value.find(t => t.path === path)
@@ -285,7 +290,7 @@ async function openFileInEditor(path: string) {
   if (opening.has(path)) return
   opening.add(path)
   try {
-    const { data } = await workspaceApi.readFile(workspaceSessionId.value, path)
+    const { data } = await workspaceApi.readFile(sessionScope.value, path)
     // The read may have finished after another click already opened the same file.
     if (fileTabs.value.some(t => t.path === data.path)) {
       activeKey.value = fileTabs.value.find(t => t.path === data.path)!.key
@@ -331,7 +336,7 @@ async function saveTab(tab: FileTab) {
     saveTimers.delete(tab.key)
   }
   try {
-    await workspaceApi.writeFile(tab.sessionId, tab.path, tab.content)
+    await workspaceApi.writeFile({ kind: 'session', sessionId: tab.sessionId }, tab.path, tab.content)
     tab.dirty = false
   } catch {
     // Leave it marked dirty: an unsaved change must not look saved.

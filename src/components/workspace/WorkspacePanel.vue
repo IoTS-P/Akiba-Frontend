@@ -15,7 +15,7 @@
         v-for="entry in tree"
         :key="entry.path"
         :entry="entry"
-        :session-id="sessionId"
+        :scope="scope"
         @open-file="$emit('openFile', $event)"
         @changed="load('')"
         @error="error = $event"
@@ -27,9 +27,9 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import TreeNode from '@/components/workspace/TreeNode.vue'
-import { workspaceApi, type WorkspaceEntry } from '@/services/workspace'
+import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
-const props = defineProps<{ sessionId: string }>()
+const props = defineProps<{ scope: WorkspaceScope }>()
 defineEmits<{ close: []; openFile: [path: string] }>()
 
 const tree = ref<WorkspaceEntry[]>([])
@@ -39,7 +39,7 @@ const dragging = ref(false)
 async function load(path: string) {
   error.value = ''
   try {
-    const { data } = await workspaceApi.tree(props.sessionId, path)
+    const { data } = await workspaceApi.tree(props.scope, path)
     if (path) return
     tree.value = data.entries
   } catch (e: any) {
@@ -51,7 +51,7 @@ async function createFile() {
   const name = window.prompt('New file name')
   if (!name) return
   try {
-    await workspaceApi.writeFile(props.sessionId, name, '')
+    await workspaceApi.writeFile(props.scope, name, '')
     await load('')
   } catch {
     error.value = 'Could not create the file.'
@@ -64,14 +64,14 @@ async function onDrop(ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
   try {
-    for (const file of files) await workspaceApi.upload(props.sessionId, '', file)
+    for (const file of files) await workspaceApi.upload(props.scope, '', file)
     await load('')
   } catch {
     error.value = 'Upload failed.'
   }
 }
 
-watch(() => props.sessionId, () => void load(''))
+watch(() => props.scope, () => void load(''), { deep: true })
 onMounted(() => void load(''))
 </script>
 

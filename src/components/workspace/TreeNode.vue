@@ -26,7 +26,7 @@
         v-for="child in children"
         :key="child.path"
         :entry="child"
-        :session-id="sessionId"
+        :scope="scope"
         :depth="depth + 1"
         @open-file="$emit('openFile', $event)"
         @changed="onChildChanged"
@@ -38,11 +38,11 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { workspaceApi, type WorkspaceEntry } from '@/services/workspace'
+import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
 const props = withDefaults(defineProps<{
   entry: WorkspaceEntry
-  sessionId: string
+  scope: WorkspaceScope
   depth?: number
 }>(), { depth: 0 })
 
@@ -68,7 +68,7 @@ function activate() {
 
 async function loadChildren() {
   try {
-    const { data } = await workspaceApi.tree(props.sessionId, props.entry.path)
+    const { data } = await workspaceApi.tree(props.scope, props.entry.path)
     children.value = data.entries
   } catch {
     emit('error', 'Could not read this folder.')
@@ -88,7 +88,7 @@ function humanSize(bytes: number): string {
 
 function download() {
   menu.value = false
-  window.open(workspaceApi.downloadUrl(props.sessionId, props.entry.path), '_blank')
+  window.open(workspaceApi.downloadUrl(props.scope, props.entry.path), '_blank')
 }
 
 async function newFolder() {
@@ -97,7 +97,7 @@ async function newFolder() {
   if (!name) return
   try {
     // A folder exists once something is written into it; an empty marker keeps it addressable.
-    await workspaceApi.writeFile(props.sessionId, `${props.entry.path}/${name}/.keep`, '')
+    await workspaceApi.writeFile(props.scope, `${props.entry.path}/${name}/.keep`, '')
     onChildChanged()
   } catch {
     emit('error', 'Could not create the folder.')
@@ -108,7 +108,7 @@ async function remove() {
   menu.value = false
   if (!window.confirm(`Delete ${props.entry.name}?`)) return
   try {
-    await workspaceApi.deleteEntry(props.sessionId, props.entry.path)
+    await workspaceApi.deleteEntry(props.scope, props.entry.path)
     emit('changed')
   } catch {
     emit('error', 'Could not delete this entry.')
@@ -120,7 +120,7 @@ async function onDrop(ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
   try {
-    for (const file of files) await workspaceApi.upload(props.sessionId, props.entry.path, file)
+    for (const file of files) await workspaceApi.upload(props.scope, props.entry.path, file)
     await loadChildren()
     emit('changed')
   } catch {
