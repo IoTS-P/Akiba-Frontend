@@ -51,7 +51,7 @@ onMounted(() => {
   })
   // Ctrl/Cmd+S belongs to the document, not the browser.
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
-  bind(props.uri, props.language)
+  bind(props.uri, props.language, props.modelValue)
 
   editor.onDidChangeModelContent(() => {
     // setValue fires this too; that is a load, not an edit, and must not mark the document dirty.
@@ -63,11 +63,18 @@ onMounted(() => {
 })
 
 /** Point the one editor at the requested document. */
-function bind(uri: string, language: string) {
+function bind(uri: string, language: string, initial: string) {
   if (!editor || !uri) return
   currentUri = uri
-  const { model } = modelFor(uri, language, '')
+  const { model, created } = modelFor(uri, language, initial)
   if (editor.getModel() !== model) editor.setModel(model)
+  // A brand new document starts from the text its owner already has; an existing one keeps
+  // whatever it holds, which may be newer than the copy on disk.
+  if (created && initial && model.getValue() !== initial) {
+    suppress = true
+    model.setValue(initial)
+    suppress = false
+  }
 }
 
 /** Write text into the current document without counting it as an edit. */
@@ -81,7 +88,7 @@ function setText(text: string) {
 
 defineExpose({ setText })
 
-watch(() => props.uri, uri => bind(uri, props.language))
+watch(() => props.uri, uri => bind(uri, props.language, props.modelValue))
 
 // Only push text the editor did not produce itself, or the cursor jumps on every keystroke.
 watch(() => props.modelValue, value => {
