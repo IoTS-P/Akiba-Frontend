@@ -6,7 +6,6 @@
     <template v-else>
       <div class="bar">
         <span class="title">{{ script?.name }}</span>
-        <span v-if="script?.description" class="description">{{ script.description }}</span>
         <span class="saved" :class="{ dirty }">{{ dirty ? 'Saving…' : 'Saved' }}</span>
       </div>
       <div class="body">

@@ -56,7 +56,8 @@ async function load(offset = 0) {
   error.value = ''
   try {
     const { data } = await fileApi.list(offset, PAGE)
-    files.value = offset === 0 ? data.files : [...files.value, ...data.files]
+    const rows = [...(data.files ?? [])].sort((a, b) => a.id - b.id)
+    files.value = offset === 0 ? rows : [...files.value, ...rows]
     hasMore.value = files.value.length < (data.total ?? 0)
   } catch {
     error.value = 'Could not load files.'

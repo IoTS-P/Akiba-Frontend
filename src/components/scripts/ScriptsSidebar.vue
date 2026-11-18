@@ -61,7 +61,7 @@ const visible = computed(() => {
 async function load() {
   try {
     const { data } = await scriptApi.list(200)
-    scripts.value = data.scripts ?? []
+    scripts.value = [...(data.scripts ?? [])].sort((a, b) => a.id - b.id)
   } catch {
     error.value = 'Could not load scripts.'
   }
