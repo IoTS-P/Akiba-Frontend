@@ -50,6 +50,7 @@
           v-if="workspaceSessionId"
           :session-id="workspaceSessionId"
           class="split-bottom"
+          @open-file="openFileInEditor"
           :style="{ flexBasis: splitPercent + '%' }"
           @close="workspaceSessionId = null"
         />
@@ -97,6 +98,28 @@
         <div class="tab-spacer"></div>
         <SystemStatus />
       </div>
+      <!-- A file opens over the page, not in it: the page behind stays where it was. -->
+      <div v-if="openFile" class="file-overlay">
+        <div class="file-bar">
+          <span class="file-path">{{ openFile.path }}</span>
+          <span v-if="openFile.binary" class="file-note">binary file — download to inspect</span>
+          <button class="bar-btn" :disabled="openFile.binary" @click="saveFile">Save</button>
+          <button class="bar-btn" @click="downloadOpenFile">Download</button>
+          <button class="bar-btn" @click="openFile = null">Close</button>
+        </div>
+        <div class="file-body">
+          <WorkspaceEditor
+            v-if="!openFile.binary"
+            v-model="openFile.content"
+            :language="openFile.language"
+            @save="saveFile"
+          />
+          <div v-else class="file-note-block">
+            This file is not text. Use Download and open it locally.
+          </div>
+        </div>
+      </div>
+
       <div class="content">
         <router-view />
       </div>
@@ -111,7 +134,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
-import WorkspacePanel from '@/components/sidebar/WorkspacePanel.vue'
+import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
+import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
+import { workspaceApi } from '@/services/workspace'
 
 interface ViewItem {
   path: string
@@ -203,6 +228,53 @@ function startSplitDrag(e: PointerEvent) {
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
+}
+
+interface OpenFile {
+  path: string
+  content: string
+  language: string
+  binary: boolean
+}
+
+const openFile = ref<OpenFile | null>(null)
+
+/** Monaco needs a language id, not an extension; common ones are enough here. */
+function languageOf(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    json: 'json', kt: 'kotlin', kts: 'kotlin', java: 'java', py: 'python',
+    md: 'markdown', txt: 'plaintext', log: 'plaintext', csv: 'plaintext',
+    c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', rs: 'rust', go: 'go',
+    sh: 'shell', yaml: 'yaml', yml: 'yaml', xml: 'xml', html: 'html', css: 'css',
+  }
+  return map[ext] ?? 'plaintext'
+}
+
+async function openFileInEditor(path: string) {
+  if (!workspaceSessionId.value) return
+  try {
+    const { data } = await workspaceApi.readFile(workspaceSessionId.value, path)
+    openFile.value = {
+      path: data.path,
+      content: data.content,
+      language: languageOf(data.path),
+      binary: data.binary,
+    }
+  } catch {
+    openFile.value = null
+  }
+}
+
+async function saveFile() {
+  if (!openFile.value || !workspaceSessionId.value) return
+  await workspaceApi.writeFile(workspaceSessionId.value, openFile.value.path, openFile.value.content)
+}
+
+function downloadOpenFile() {
+  if (!openFile.value || !workspaceSessionId.value) return
+  window.open(workspaceApi.downloadUrl(workspaceSessionId.value, openFile.value.path), '_blank')
 }
 
 /** The conversation whose workspace is open below the session tree, if any. */
@@ -448,6 +520,7 @@ async function handleLogout() {
 
 /* ---- editor area ------------------------------------------------------- */
 .editor {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -485,6 +558,63 @@ async function handleLogout() {
 
 .tab-spacer {
   flex: 1;
+}
+
+.file-overlay {
+  position: absolute;
+  inset: 36px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editor-background);
+  z-index: 30;
+}
+
+.file-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 12px;
+}
+
+.file-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-editor-foreground);
+}
+
+.file-note,
+.file-note-block,
+.bar-btn,
+.save-state {
+  color: var(--akiba-chat-text-faint);
+}
+
+.file-note-block {
+  padding: 16px;
+  font-size: 13px;
+}
+
+.bar-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--akiba-radius-sm);
+  padding: 2px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bar-btn:hover {
+  background: var(--akiba-chat-hover);
+  color: var(--vscode-editor-foreground);
+}
+
+.file-body {
+  flex: 1;
+  min-height: 0;
 }
 
 .content {
