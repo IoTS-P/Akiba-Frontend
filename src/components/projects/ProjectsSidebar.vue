@@ -4,7 +4,14 @@
       <input v-model="query" type="search" placeholder="Search programs…" aria-label="Search programs" />
     </div>
 
-    <div class="tree" @contextmenu.self.prevent="blankMenu($event)">
+    <div
+      class="tree"
+      @contextmenu.self.prevent="blankMenu($event)"
+      @dragover.prevent="dragOver = true"
+      @dragleave="dragOver = false"
+      @drop.prevent="dropOnEmpty"
+      :class="{ 'drop-target': dragOver }"
+    >
       <div v-for="p in projects" :key="p.name" class="project">
         <div
           class="project-row"
@@ -81,6 +88,7 @@ const open = ref<Set<string>>(new Set())
 const query = ref('')
 const selectedProject = ref<string | null>(null)
 const error = ref('')
+const dragOver = ref(false)
 
 function rootsOf(project: string): Entry[] {
   const all = entriesByProject[project] ?? []
@@ -138,6 +146,14 @@ async function reload(name: string) {
  * A binary enters Akiba first (the file store gives it an id) and is then attached to the
  * project folder, which is the same order the Files page uses.
  */
+/** A drop on the tree's empty space means "into the project that is open". */
+async function dropOnEmpty(ev: DragEvent) {
+  dragOver.value = false
+  const project = selectedProject.value ?? projects.value[0]?.name
+  if (!project) return
+  await importInto(project, '', ev)
+}
+
 async function importInto(project: string, folder: string, ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
@@ -146,7 +162,12 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
       const form = new FormData()
       form.append('files', file, file.name)
       const imported = await fileApi.import(form)
-      for (const id of imported.data.fileIds ?? []) {
+      const ids = imported.data?.fileIds ?? []
+      if (!ids.length) {
+        error.value = `The file store accepted ${file.name} but returned no id; nothing was imported.`
+        continue
+      }
+      for (const id of ids) {
         await projectApi.importBinary(project, { binaryId: String(id), folder })
       }
     }
@@ -349,6 +370,11 @@ void emit
   height: 1px;
   margin: 4px 0;
   background: var(--vscode-panel-border);
+}
+
+.tree.drop-target {
+  outline: 1px dashed var(--vscode-focusBorder);
+  outline-offset: -4px;
 }
 
 .hint {
