@@ -10,6 +10,7 @@
       </div>
       <div v-if="script" class="body">
         <WorkspaceEditor
+          ref="editorRef"
           v-model="code"
           :language="script?.language || 'kotlin'"
           :uri="`akiba://script/${activeId}`"
@@ -22,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
@@ -35,17 +36,23 @@ const code = ref('')
 const dirty = ref(false)
 /** A load is not an edit: without this the old text is saved into the newly chosen script. */
 const loading = ref(false)
+const editorRef = ref<{ setText: (t: string) => void } | null>(null)
 
 const activeId = computed(() => Number(route.query.id) || null)
 
 async function load(id: number) {
+  // A save scheduled for the previous script must not fire into this one.
+  window.clearTimeout(timer)
   loading.value = true
   try {
     const { data } = await scriptApi.get(id)
     script.value = data
     // A model that is already open may hold edits newer than the server's copy.
-    const open = textOf(`akiba://script/${id}`)
-    code.value = open ?? data.code ?? ''
+    // A document already open may hold edits newer than the server's copy.
+    const text = textOf(`akiba://script/${id}`) ?? data.code ?? ''
+    code.value = text
+    await nextTick()
+    editorRef.value?.setText(text)
     dirty.value = false
   } catch {
     script.value = null
@@ -64,7 +71,10 @@ watch(code, value => {
   }
   dirty.value = true
   window.clearTimeout(timer)
-  timer = window.setTimeout(() => void save(), 800)
+  const forId = script.value.id
+  timer = window.setTimeout(() => {
+    if (script.value?.id === forId) void save()
+  }, 800)
 })
 
 async function save() {
