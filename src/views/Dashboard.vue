@@ -185,7 +185,7 @@ async function loadRecentScripts() {
 
 .res-card {
   padding: 14px 16px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #e3e6ea;
   border-radius: 10px;
 }
@@ -211,7 +211,7 @@ async function loadRecentScripts() {
 
 .res-bar {
   height: 6px;
-  background: #eef0f3;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -229,12 +229,12 @@ async function loadRecentScripts() {
 .res-sub {
   margin-top: 8px;
   font-size: 0.75rem;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 
 .pid {
   font-size: 0.72rem;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 
 .dashboard {
@@ -250,7 +250,7 @@ async function loadRecentScripts() {
 }
 
 .stat-card {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 24px;
   border-radius: 10px;
   display: flex;
@@ -271,7 +271,7 @@ async function loadRecentScripts() {
 
 .stat-label {
   font-size: 14px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 
 .sections {
@@ -281,7 +281,7 @@ async function loadRecentScripts() {
 }
 
 .section {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 24px;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -294,7 +294,7 @@ async function loadRecentScripts() {
 }
 
 .empty {
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   font-size: 14px;
   text-align: center;
   padding: 20px;
@@ -311,13 +311,13 @@ async function loadRecentScripts() {
   justify-content: space-between;
   align-items: center;
   padding: 12px;
-  background: #f8f9fa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 6px;
 }
 
 .name {
   font-size: 14px;
-  color: #333;
+  color: var(--vscode-editor-foreground);
 }
 
 .status {
@@ -328,18 +328,18 @@ async function loadRecentScripts() {
 }
 
 .status.running {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--akiba-info-text);
 }
 
 .status.completed {
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   color: #388e3c;
 }
 
 .status.failed {
-  background: #ffebee;
-  color: #d32f2f;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--akiba-danger-text);
 }
 
 .progress-bar {

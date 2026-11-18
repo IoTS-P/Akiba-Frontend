@@ -87,7 +87,7 @@ async function handleSubmit() {
 }
 
 .login-card {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 40px;
   border-radius: 12px;
   width: 400px;
@@ -103,14 +103,14 @@ async function handleSubmit() {
 
 .subtitle {
   text-align: center;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   margin-bottom: 30px;
 }
 
 .setup-hint {
   font-size: 13px;
-  color: #555;
-  background: #fff5f7;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-left: 3px solid #e94560;
   padding: 10px 12px;
   border-radius: 4px;
@@ -133,7 +133,7 @@ async function handleSubmit() {
 .form-group label {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--vscode-editor-foreground);
 }
 
 .form-group input {

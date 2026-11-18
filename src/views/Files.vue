@@ -476,7 +476,7 @@ async function deleteFile(file: FileEntry) {
 
 .success-msg {
   color: #059669;
-  background: #d1fae5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 10px 16px;
   border-radius: 6px;
   margin-bottom: 16px;
@@ -495,7 +495,7 @@ async function deleteFile(file: FileEntry) {
 }
 
 .dialog {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 10px;
   padding: 28px;
   width: 520px;
@@ -530,7 +530,7 @@ async function deleteFile(file: FileEntry) {
 
 .file-drop-zone.drag-over {
   border-color: var(--primary, #4f46e5);
-  background: #eef2ff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .file-input {
@@ -582,7 +582,7 @@ async function deleteFile(file: FileEntry) {
   font-size: 0.85rem;
 }
 .file-item:last-child { border-bottom: none; }
-.file-item:hover { background: #fafafa; }
+.file-item:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 
 .file-item .file-name {
   flex: 1;
@@ -602,7 +602,7 @@ async function deleteFile(file: FileEntry) {
 .btn-remove {
   background: none;
   border: none;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   font-size: 18px;
   cursor: pointer;
   line-height: 1;
@@ -709,11 +709,11 @@ async function deleteFile(file: FileEntry) {
   justify-content: space-between;
   align-items: center;
   padding: 8px 14px;
-  background: #f9fafb;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-bottom: 1px solid #e5e7eb;
   font-size: 0.8rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--vscode-editor-foreground);
 }
 .status-badge {
   font-size: 0.75rem;
@@ -721,9 +721,9 @@ async function deleteFile(file: FileEntry) {
   border-radius: 10px;
   text-transform: lowercase;
 }
-.status-badge.running { background: #e3f2fd; color: #1976d2; }
-.status-badge.completed { background: #e8f5e9; color: #388e3c; }
-.status-badge.failed { background: #ffebee; color: #d32f2f; }
+.status-badge.running { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-info-text); }
+.status-badge.completed { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: #388e3c; }
+.status-badge.failed { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-danger-text); }
 
 .progress-log {
   max-height: 240px;
@@ -736,5 +736,5 @@ async function deleteFile(file: FileEntry) {
   color: #e0e0e0;
 }
 .log-line { white-space: pre-wrap; word-break: break-all; }
-.log-pending { color: #888; font-style: italic; }
+.log-pending { color: var(--akiba-chat-text-faint); font-style: italic; }
 </style>

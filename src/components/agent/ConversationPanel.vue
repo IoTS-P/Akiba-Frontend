@@ -172,7 +172,7 @@ onUnmounted(stopPolling)
   display: flex;
   flex-direction: row;
   border-left: 1px solid #e0e0e0;
-  background: #fafcff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   flex-shrink: 0;
   overflow: hidden;
   transition: width 0.2s ease;
@@ -193,15 +193,15 @@ onUnmounted(stopPolling)
   border: none;
   cursor: pointer;
   flex-shrink: 0;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   font-size: 12px;
 }
 .conv-panel-toggle:hover {
-  background: #eef5ff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .conv-panel-toggle-icon {
   font-size: 10px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
 }
 .conv-panel-toggle-label {
   position: relative;
@@ -226,27 +226,27 @@ onUnmounted(stopPolling)
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-left: 1px solid #e8e8e8;
+  border-left: 1px solid var(--akiba-chat-surface-alt);
 }
 .conv-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
   flex-shrink: 0;
 }
 .conv-panel-title {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--vscode-editor-foreground);
 }
 .conv-panel-refresh {
   background: none;
   border: none;
   cursor: pointer;
   font-size: 15px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -260,7 +260,7 @@ onUnmounted(stopPolling)
 .conv-panel-error {
   padding: 8px 14px;
   font-size: 12px;
-  color: #c62828;
+  color: var(--akiba-danger-text);
 }
 .conv-panel-empty {
   padding: 20px 14px;
@@ -275,15 +275,15 @@ onUnmounted(stopPolling)
 }
 .conv-item {
   padding: 10px 14px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
   cursor: pointer;
   transition: background 0.1s;
 }
 .conv-item:hover {
-  background: #f5f9ff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .conv-item-active {
-  background: #eef5ff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .conv-item-header {
   display: flex;
@@ -294,7 +294,7 @@ onUnmounted(stopPolling)
 .conv-item-id {
   font-size: 12px;
   font-weight: 600;
-  color: #1976d2;
+  color: var(--akiba-info-text);
 }
 .conv-item-badge {
   background: #e94560;
@@ -308,19 +308,19 @@ onUnmounted(stopPolling)
 }
 .conv-item-count {
   font-size: 10px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   margin-left: auto;
 }
 .conv-item-kind {
   font-size: 9px;
   background: #e0e0e0;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   border-radius: 3px;
   padding: 1px 4px;
 }
 .conv-item-preview {
   font-size: 11px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -328,7 +328,7 @@ onUnmounted(stopPolling)
 }
 .conv-item-time {
   font-size: 9px;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   margin-top: 2px;
 }
 .conv-messages {
@@ -342,11 +342,11 @@ onUnmounted(stopPolling)
   padding: 6px 8px;
   margin-bottom: 6px;
   border-radius: 6px;
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   font-size: 11px;
 }
 .conv-msg-out {
-  background: #e3f2fd;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .conv-msg-header {
   display: flex;
@@ -357,12 +357,12 @@ onUnmounted(stopPolling)
 .conv-msg-kind {
   font-size: 9px;
   font-weight: 600;
-  color: #1976d2;
+  color: var(--akiba-info-text);
   text-transform: uppercase;
 }
 .conv-msg-from {
   font-size: 10px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   font-family: monospace;
 }
 .conv-msg-acked {
@@ -373,12 +373,12 @@ onUnmounted(stopPolling)
 .conv-msg-subject {
   font-size: 11px;
   font-weight: 600;
-  color: #333;
+  color: var(--vscode-editor-foreground);
   margin-bottom: 2px;
 }
 .conv-msg-body {
   font-size: 11px;
-  color: #444;
+  color: var(--vscode-editor-foreground);
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -388,7 +388,7 @@ onUnmounted(stopPolling)
 }
 .conv-msg-time {
   font-size: 9px;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   margin-top: 2px;
 }
 </style>

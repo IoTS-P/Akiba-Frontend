@@ -492,10 +492,10 @@ function onLeave() {
   transition: background 0.1s;
 }
 .session-row:hover {
-  background: #fafafa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .session-tree-item-active > .session-row {
-  background: #fff5f7;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 /*
@@ -601,7 +601,7 @@ function onLeave() {
   background: none;
   border: none;
   cursor: pointer;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   font-size: 11px;
   padding: 0;
   margin-right: 2px;
@@ -610,7 +610,7 @@ function onLeave() {
 }
 .session-expand-btn:hover {
   background: rgba(0, 0, 0, 0.06);
-  color: #222;
+  color: var(--vscode-editor-foreground);
 }
 .session-expand-btn-loading {
   cursor: wait;
@@ -631,8 +631,8 @@ function onLeave() {
   display: inline-block;
   font-size: 9px;
   font-weight: 600;
-  color: #1976d2;
-  background: #e3f2fd;
+  color: var(--akiba-info-text);
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 7px;
   padding: 0 4px;
   min-width: 12px;
@@ -680,7 +680,7 @@ function onLeave() {
   right: 4px;
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -722,11 +722,11 @@ function onLeave() {
 }
 .session-closed-summary > .session-row:hover,
 .session-closed-header > .session-row:hover {
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .closed-summary-text {
   font-size: 11px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   font-style: italic;
   white-space: nowrap;
   overflow: hidden;
@@ -735,7 +735,7 @@ function onLeave() {
 .session-closed-summary .session-expand-icon,
 .session-closed-header .session-expand-icon {
   font-size: 10px;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   margin-right: 4px;
   width: 14px;
   display: inline-block;

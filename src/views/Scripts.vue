@@ -479,7 +479,7 @@ function formatDate(date: string | null | undefined) {
 
 <style scoped>
 .scripts {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 24px;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -503,8 +503,8 @@ function formatDate(date: string | null | undefined) {
 
 .btn-secondary {
   padding: 10px 20px;
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -515,7 +515,7 @@ function formatDate(date: string | null | undefined) {
 .loading, .empty {
   text-align: center;
   padding: 40px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
 }
 .loading.small, .empty.small { padding: 14px; font-size: 13px; }
 
@@ -530,19 +530,19 @@ function formatDate(date: string | null | undefined) {
 .table th, .table td {
   padding: 14px 16px;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
 }
 .table.sub th, .table.sub td { padding: 8px 12px; font-size: 13px; }
 
 .table th {
   font-weight: 600;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   font-size: 14px;
 }
 
 .name-cell { display: flex; flex-direction: column; gap: 2px; }
 .name-cell .name { font-weight: 500; }
-.name-cell .desc { font-size: 12px; color: #888; }
+.name-cell .desc { font-size: 12px; color: var(--akiba-chat-text-faint); }
 
 .actions-cell { white-space: nowrap; }
 
@@ -554,18 +554,18 @@ function formatDate(date: string | null | undefined) {
   text-transform: lowercase;
 }
 
-.status.pending { background: #fff8e1; color: #f57c00; }
-.status.running { background: #e3f2fd; color: #1976d2; }
-.status.completed { background: #e8f5e9; color: #388e3c; }
-.status.failed { background: #ffebee; color: #d32f2f; }
-.status.cancelled { background: #f5f5f5; color: #777; }
-.status.unknown { background: #f5f5f5; color: #999; }
+.status.pending { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: #f57c00; }
+.status.running { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-info-text); }
+.status.completed { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: #388e3c; }
+.status.failed { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-danger-text); }
+.status.cancelled { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-chat-text-faint); }
+.status.unknown { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-chat-text-faint); }
 
 .btn-action {
   padding: 6px 12px;
   margin-right: 6px;
   border: 1px solid #ddd;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
@@ -582,17 +582,17 @@ function formatDate(date: string | null | undefined) {
   gap: 16px;
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--akiba-chat-surface-alt);
 }
 .page-info {
   font-size: 13px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 
 /* ---- Params Section ---- */
 .params-section {
-  background: #f8f9fa;
-  border: 1px solid #e8e8e8;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 16px;
@@ -600,12 +600,12 @@ function formatDate(date: string | null | undefined) {
 .section-label {
   display: block;
   font-size: 12px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 10px;
 }
-.hint { color: #888; font-weight: 400; font-size: 12px; }
+.hint { color: var(--akiba-chat-text-faint); font-weight: 400; font-size: 12px; }
 
 .modal {
   position: fixed;
@@ -618,7 +618,7 @@ function formatDate(date: string | null | undefined) {
 }
 
 .modal-content {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 30px;
   border-radius: 10px;
   width: 500px;
@@ -675,20 +675,20 @@ function formatDate(date: string | null | undefined) {
 .section-label {
   font-size: 14px;
   font-weight: 500;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   margin: 16px 0 8px;
 }
 
 .desc-block {
-  background: #f8f9fa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 10px 14px;
   border-radius: 6px;
   font-size: 13px;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
 }
 
 .code-block {
-  background: #f8f9fa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 14px;
   border-radius: 6px;
   font-size: 13px;
@@ -702,7 +702,7 @@ function formatDate(date: string | null | undefined) {
 .code-block.output { max-height: 200px; }
 
 .error {
-  color: #d32f2f;
+  color: var(--akiba-danger-text);
   font-size: 13px;
   margin-top: 4px;
   margin-bottom: 8px;
@@ -727,14 +727,14 @@ function formatDate(date: string | null | undefined) {
 /* ---- Execution detail ---- */
 .exec-detail {
   margin-top: 12px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 8px;
   padding: 12px 16px;
-  background: #fafafa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .ml8 { margin-left: 8px; }
 .selected-exec {
-  background: #f0f7ff !important;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent) !important;
   cursor: pointer;
 }
 .table.sub tbody tr {
@@ -742,6 +742,6 @@ function formatDate(date: string | null | undefined) {
   transition: background 0.1s;
 }
 .table.sub tbody tr:hover {
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 </style>

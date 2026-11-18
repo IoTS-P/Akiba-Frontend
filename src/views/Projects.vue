@@ -599,13 +599,13 @@ async function submitCreateProject() {
 }
 .toolbar .title {
   font-size: 15px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 .refresh-btn {
   padding: 6px 16px;
   border: 1px solid #ccc;
   border-radius: 6px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   cursor: pointer;
 }
 .refresh-btn:hover { border-color: #e94560; color: #e94560; }
@@ -624,7 +624,7 @@ async function submitCreateProject() {
 .loading, .error, .empty {
   text-align: center;
   padding: 40px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
 }
 .error { color: #e94560; }
 
@@ -635,10 +635,10 @@ async function submitCreateProject() {
 .projects-table th {
   text-align: left;
   padding: 12px 16px;
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   font-size: 13px;
   font-weight: 600;
-  color: #444;
+  color: var(--vscode-editor-foreground);
   border-bottom: 2px solid #e0e0e0;
 }
 .projects-table td {
@@ -659,7 +659,7 @@ async function submitCreateProject() {
   padding: 4px 14px;
   border: 1px solid #e94560;
   border-radius: 4px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   color: #e94560;
   cursor: pointer;
   font-size: 13px;
@@ -669,7 +669,7 @@ async function submitCreateProject() {
   padding: 4px 14px;
   border: 1px solid #6c757d;
   border-radius: 4px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   color: #6c757d;
   cursor: pointer;
   font-size: 13px;
@@ -706,7 +706,7 @@ async function submitCreateProject() {
   z-index: 1000;
 }
 .modal-content {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 8px;
   width: 560px;
   max-width: 90vw;
@@ -731,11 +731,11 @@ async function submitCreateProject() {
   border: none;
   font-size: 20px;
   cursor: pointer;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   padding: 0;
   line-height: 1;
 }
-.modal-close:hover { color: #333; }
+.modal-close:hover { color: var(--vscode-editor-foreground); }
 
 .modal-footer {
   display: flex;
@@ -748,12 +748,12 @@ async function submitCreateProject() {
   padding: 6px 16px;
   border: 1px solid #ccc;
   border-radius: 4px;
-  background: #fff;
-  color: #666;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-descriptionForeground);
   cursor: pointer;
   font-size: 13px;
 }
-.btn-secondary:hover { background: #f5f5f5; }
+.btn-secondary:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .btn-primary {
   padding: 6px 16px;
   border: none;
@@ -776,7 +776,7 @@ async function submitCreateProject() {
 .gar-summary {
   margin: 0 0 12px;
   font-size: 13px;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
 }
 .gar-programs-table {
   width: 100%;
@@ -786,8 +786,8 @@ async function submitCreateProject() {
 .gar-programs-table th {
   text-align: left;
   padding: 6px 10px;
-  background: #f5f5f5;
-  color: #444;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border-bottom: 1px solid #e0e0e0;
 }
 .gar-programs-table td {
@@ -796,11 +796,11 @@ async function submitCreateProject() {
   font-family: monospace;
 }
 .gar-prog-new {
-  color: #2e7d32;
+  color: var(--akiba-success-text);
   font-weight: 600;
 }
 .gar-prog-reused {
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 .gar-prog-error {
   color: #e94560;
@@ -818,8 +818,8 @@ async function submitCreateProject() {
   padding: 4px 14px;
   border: 1px solid #dc3545;
   border-radius: 4px;
-  background: #fff;
-  color: #dc3545;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--akiba-danger-text);
   cursor: pointer;
   font-size: 13px;
   white-space: nowrap;
@@ -837,32 +837,32 @@ async function submitCreateProject() {
   width: 480px;
 }
 .delete-modal-title {
-  color: #dc3545;
+  color: var(--akiba-danger-text);
 }
 .delete-modal-body {
   padding: 20px 24px;
 }
 .delete-warning {
   font-size: 14px;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   margin: 0 0 8px;
 }
 .delete-project-name {
   font-size: 18px;
   font-weight: 700;
-  color: #dc3545;
+  color: var(--akiba-danger-text);
   margin: 0 0 12px;
   word-break: break-all;
 }
 .delete-hint {
   font-size: 13px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   margin: 0 0 16px;
   line-height: 1.5;
 }
 .delete-hint code {
   font-family: monospace;
-  background: #f0f0f0;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 12px;
@@ -873,7 +873,7 @@ async function submitCreateProject() {
   gap: 8px;
   font-size: 14px;
   cursor: pointer;
-  color: #333;
+  color: var(--vscode-editor-foreground);
   margin-bottom: 6px;
 }
 .delete-logs-option input {
@@ -882,7 +882,7 @@ async function submitCreateProject() {
 }
 .delete-logs-hint {
   font-size: 12px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   margin: 0 0 0 24px;
   line-height: 1.4;
 }
@@ -943,7 +943,7 @@ async function submitCreateProject() {
   display: block;
   margin-bottom: 6px;
   font-size: 0.78rem;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 
 .rename-input {
@@ -970,7 +970,7 @@ async function submitCreateProject() {
   margin: 12px 0 0;
   font-size: 0.75rem;
   line-height: 1.5;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 
 .fb-bar {
@@ -979,7 +979,7 @@ async function submitCreateProject() {
   gap: 8px;
   padding: 8px 10px;
   margin-bottom: 8px;
-  background: #f6f7f9;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #e3e6ea;
   border-radius: 8px;
 }
@@ -988,7 +988,7 @@ async function submitCreateProject() {
   padding: 2px 8px;
   font-size: 0.9rem;
   color: #4a7dff;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #d6d9de;
   border-radius: 6px;
   cursor: pointer;
@@ -1023,7 +1023,7 @@ async function submitCreateProject() {
 .fb-hint {
   margin-left: auto;
   font-size: 0.72rem;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 
 .tree-wrap {
@@ -1063,7 +1063,7 @@ async function submitCreateProject() {
   z-index: 60;
   min-width: 180px;
   padding: 4px 0;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #dfe3e8;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -1087,7 +1087,7 @@ async function submitCreateProject() {
 .ctx-menu-sep {
   height: 1px;
   margin: 4px 0;
-  background: #eceef1;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .modal-content.details-modal {

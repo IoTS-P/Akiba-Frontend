@@ -165,9 +165,9 @@ onMounted(loadSkills)
 
 <style scoped>
 .skills-page { display: flex; flex-direction: column; gap: 20px; }
-.panel { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.panel { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 .upload-panel { display: flex; flex-direction: column; gap: 12px; }
-.hint { color: #666; margin: 6px 0 0; }
+.hint { color: var(--vscode-descriptionForeground); margin: 6px 0 0; }
 .upload-row, .toolbar, .skill-header, .meta { display: flex; align-items: center; gap: 12px; }
 .upload-row { flex-wrap: wrap; }
 .toolbar, .skill-header { justify-content: space-between; }
@@ -178,16 +178,16 @@ button.secondary { background: #16213e; }
 button.danger { background: #8b1e2d; }
 button.link { background: transparent; color: #e94560; padding: 0; }
 .message { color: #0a7a32; }
-.error { color: #c62828; }
-.selected, .skill-id, .file-size, .meta { color: #666; font-size: 13px; }
+.error { color: var(--akiba-danger-text); }
+.selected, .skill-id, .file-size, .meta { color: var(--vscode-descriptionForeground); font-size: 13px; }
 .skill-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-.skill-card { border: 1px solid #eee; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.skill-card { border: 1px solid var(--akiba-chat-surface-alt); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .skill-card h4 { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chips span { background: #f3f3f8; border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+.chips span { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
 ul { padding-left: 18px; }
 li { margin: 6px 0; }
 .reader pre { max-height: 500px; overflow: auto; background: #111827; color: #e5e7eb; padding: 16px; border-radius: 8px; white-space: pre-wrap; }
-.empty { color: #888; }
-code { background: #f3f3f8; padding: 2px 4px; border-radius: 4px; }
+.empty { color: var(--akiba-chat-text-faint); }
+code { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); padding: 2px 4px; border-radius: 4px; }
 </style>

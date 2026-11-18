@@ -48,11 +48,6 @@ const router = createRouter({
           component: () => import('@/views/Files.vue')
         },
         {
-          path: 'query',
-          name: 'query',
-          component: () => import('@/views/Query.vue')
-        },
-        {
           path: 'projects',
           name: 'projects',
           component: () => import('@/views/Projects.vue')

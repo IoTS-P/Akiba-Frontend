@@ -144,7 +144,7 @@ onBeforeUnmount(detachOutsideListeners)
   padding: 6px 8px;
   border: 1px solid var(--border, #d1d5db);
   border-radius: 5px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   color: var(--text, #374151);
   font-size: 12px;
   cursor: pointer;
@@ -178,7 +178,7 @@ onBeforeUnmount(detachOutsideListeners)
   margin: 0;
   padding: 4px;
   list-style: none;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid var(--border, #d1d5db);
   border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
@@ -200,7 +200,7 @@ onBeforeUnmount(detachOutsideListeners)
 }
 /* Selected marker: soft tinted shadow instead of a check-mark. */
 .filter-dropdown-item.selected {
-  background: #eef2ff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   box-shadow: inset 0 0 0 1px #c7d2fe, 0 1px 3px rgba(79, 70, 229, 0.15);
   color: var(--primary, #4f46e5);
   font-weight: 500;

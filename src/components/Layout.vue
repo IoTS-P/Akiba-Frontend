@@ -27,10 +27,6 @@
           <span class="icon">📁</span>
           <span>Files</span>
         </router-link>
-        <router-link to="/query" class="nav-item">
-          <span class="icon">🔍</span>
-          <span>Query</span>
-        </router-link>
         <router-link to="/skills" class="nav-item">
           <span class="icon">🧩</span>
           <span>Skills</span>
@@ -91,7 +87,6 @@ const currentRoute = computed(() => {
     agent: 'Agent',
     projects: 'Ghidra Projects',
     files: 'Files',
-    query: 'Query',
     skills: 'Skills',
     settings: 'Settings'
   }
@@ -182,7 +177,7 @@ async function handleLogout() {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   margin-bottom: 4px;
 }
 .instance-info .value {
@@ -236,7 +231,7 @@ async function handleLogout() {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 14px 30px;
   border-bottom: 1px solid #e0e0e0;
 }

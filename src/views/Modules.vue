@@ -126,9 +126,9 @@ onMounted(loadModules)
 
 <style scoped>
 .modules-page { display: flex; flex-direction: column; gap: 20px; }
-.panel { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.panel { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 .upload-panel { display: flex; flex-direction: column; gap: 12px; }
-.hint { color: #666; margin: 6px 0 0; }
+.hint { color: var(--vscode-descriptionForeground); margin: 6px 0 0; }
 .upload-row, .toolbar, .module-header, .meta { display: flex; align-items: center; gap: 12px; }
 .upload-row { flex-wrap: wrap; }
 .toolbar, .module-header { justify-content: space-between; }
@@ -139,17 +139,17 @@ button.secondary { background: #16213e; }
 button.danger { background: #8b1e2d; }
 button.sm { padding: 4px 8px; font-size: 13px; }
 .message { color: #0a7a32; }
-.error { color: #c62828; }
-.selected, .module-class, .meta { color: #666; font-size: 13px; }
+.error { color: var(--akiba-danger-text); }
+.selected, .module-class, .meta { color: var(--vscode-descriptionForeground); font-size: 13px; }
 .module-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
-.module-card { border: 1px solid #eee; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.module-card { border: 1px solid var(--akiba-chat-surface-alt); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .module-card.private { border-left: 3px solid #e94560; }
 .module-card.public { border-left: 3px solid #0a7a32; }
 .module-card h4 { margin: 0; }
 .module-actions { display: flex; align-items: center; gap: 8px; }
 .badge { padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.badge-public { background: #e3f6e8; color: #0a7a32; }
-.badge-private { background: #fce4e8; color: #c62828; }
-.empty { color: #888; }
-code { background: #f3f3f8; padding: 2px 4px; border-radius: 4px; }
+.badge-public { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: #0a7a32; }
+.badge-private { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-danger-text); }
+.empty { color: var(--akiba-chat-text-faint); }
+code { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); padding: 2px 4px; border-radius: 4px; }
 </style>

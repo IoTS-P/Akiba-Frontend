@@ -711,7 +711,7 @@ onUnmounted(() => {
   max-height: 78vh;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #dfe3e8;
   border-radius: 10px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
@@ -725,7 +725,7 @@ onUnmounted(() => {
   border-bottom: 1px solid #eceef1;
   cursor: move;
   user-select: none;
-  background: #f8f9fb;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 10px 10px 0 0;
 }
 
@@ -750,7 +750,7 @@ onUnmounted(() => {
 }
 
 .pdw-btn:hover {
-  background: #eceef1;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .pdw-body {
@@ -763,19 +763,19 @@ onUnmounted(() => {
   margin-bottom: 8px;
   font-size: 0.78rem;
   color: #b3261e;
-  background: #fdecea;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 6px;
   white-space: pre-wrap;
 }
 
 .pdw-banner.note {
   color: #1a5d2b;
-  background: #e7f6ec;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .pdw-banner.lock {
   color: #8a5a00;
-  background: #fff4e0;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .pdw-toolbar {
@@ -814,7 +814,7 @@ onUnmounted(() => {
   padding: 6px 8px;
   margin-bottom: 8px;
   font-size: 0.78rem;
-  background: #f6f7f9;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #e3e6ea;
   border-radius: 6px;
 }
@@ -822,7 +822,7 @@ onUnmounted(() => {
 .pdw-up {
   padding: 0 6px;
   color: #4a7dff;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #d6d9de;
   border-radius: 5px;
   cursor: pointer;
@@ -851,13 +851,13 @@ onUnmounted(() => {
   user-select: none;
 }
 
-.pdw-row:hover { background: #f6f7f9; }
+.pdw-row:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .pdw-row.selected { background: rgba(74, 125, 255, 0.14); }
 .pdw-row.drop { outline: 2px dashed #4a7dff; outline-offset: -2px; }
 .pdw-row.drop .pdw-icon { transform: scale(1.2); }
 .pdw-icon { display: inline-block; transition: transform 0.12s ease; }
 .pdw-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pdw-size { font-size: 0.72rem; color: #9aa0a8; }
+.pdw-size { font-size: 0.72rem; color: var(--akiba-chat-text-faint); }
 
 .pdw-edit {
   flex: 1;
@@ -871,7 +871,7 @@ onUnmounted(() => {
   padding: 24px 12px;
   text-align: center;
   font-size: 0.8rem;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 
 .pdw-marquee {
@@ -887,7 +887,7 @@ onUnmounted(() => {
   z-index: 1200;
   min-width: 180px;
   padding: 4px 0;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #dfe3e8;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -918,7 +918,7 @@ onUnmounted(() => {
 .pdw-menu-uuid-label {
   margin-right: 6px;
   letter-spacing: 0.04em;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 
 .pdw-menu-uuid-value {
@@ -933,6 +933,6 @@ onUnmounted(() => {
 .pdw-menu-hint {
   margin-left: 6px;
   font-size: 0.7rem;
-  color: #9aa0a8;
+  color: var(--akiba-chat-text-faint);
 }
 </style>

@@ -1602,29 +1602,29 @@ function handleTabKey(e: KeyboardEvent) {
 .settings { display: flex; flex-direction: column; gap: 18px; }
 
 .update-banner {
-  background: #fff3cd;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #ffc107;
   border-radius: 8px;
   padding: 12px 16px;
   margin: 12px 0;
 }
-.error-text { color: #dc3545; margin: 8px 0; }
+.error-text { color: var(--akiba-danger-text); margin: 8px 0; }
 
 .card {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 24px;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 .card h2 { font-size: 20px; margin: 0 0 6px; }
-.subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
+.subtitle { color: var(--vscode-descriptionForeground); font-size: 13px; margin: 0 0 18px; }
 
-.muted { color: #888; padding: 24px 0; text-align: center; }
+.muted { color: var(--akiba-chat-text-faint); padding: 24px 0; text-align: center; }
 .muted.small { font-size: 13px; padding: 8px 0 16px; }
 
 .config-selector {
-  background: #f8f9fa;
-  border: 1px solid #e8e8e8;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 20px;
@@ -1632,7 +1632,7 @@ function handleTabKey(e: KeyboardEvent) {
 .selector-label {
   display: block;
   font-size: 12px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
@@ -1649,7 +1649,7 @@ function handleTabKey(e: KeyboardEvent) {
   border-radius: 6px;
   font-size: 14px;
   font-family: inherit;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 .btn-danger.small {
   padding: 10px 14px;
@@ -1663,8 +1663,8 @@ function handleTabKey(e: KeyboardEvent) {
 .form-row .form-group.flex2 { flex: 2; }
 
 .form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-group label { font-size: 13px; font-weight: 500; color: #333; }
-.form-group .hint { color: #888; font-weight: 400; font-size: 12px; margin-left: 4px; }
+.form-group label { font-size: 13px; font-weight: 500; color: var(--vscode-editor-foreground); }
+.form-group .hint { color: var(--akiba-chat-text-faint); font-weight: 400; font-size: 12px; margin-left: 4px; }
 
 .form-group input,
 .form-group select {
@@ -1673,7 +1673,7 @@ function handleTabKey(e: KeyboardEvent) {
   border-radius: 6px;
   font-size: 14px;
   font-family: inherit;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .key-row {
@@ -1691,10 +1691,10 @@ function handleTabKey(e: KeyboardEvent) {
   gap: 2px 16px;
   max-height: 260px;
   overflow-y: auto;
-  border: 1px solid #eee;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
   padding: 8px 10px;
-  background: #fafafa;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 @media (max-width: 980px) {
   .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1713,7 +1713,7 @@ function handleTabKey(e: KeyboardEvent) {
   font-size: 13px;
   font-family: 'Courier New', monospace;
 }
-.model-cell:hover { background: #f0f0f0; }
+.model-cell:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .model-cell input[type="checkbox"] {
   width: auto;
   flex: none;
@@ -1749,7 +1749,7 @@ function handleTabKey(e: KeyboardEvent) {
 }
 .model-ctx-note {
   margin: 0 0 8px;
-  color: #777;
+  color: var(--akiba-chat-text-faint);
   font-size: 12px;
 }
 
@@ -1764,18 +1764,18 @@ function handleTabKey(e: KeyboardEvent) {
 
 .btn-secondary {
   padding: 10px 14px;
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #ddd;
   border-radius: 6px;
-  color: #333;
+  color: var(--vscode-editor-foreground);
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
 }
-.btn-secondary:hover:not(:disabled) { background: #eee; }
+.btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary.active {
-  background: #fff5f7;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-color: #e94560;
   color: #e94560;
 }
@@ -1798,7 +1798,7 @@ function handleTabKey(e: KeyboardEvent) {
 
 .btn-danger {
   padding: 10px 16px;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #e94560;
   color: #e94560;
   border-radius: 6px;
@@ -1807,22 +1807,22 @@ function handleTabKey(e: KeyboardEvent) {
 .btn-danger:hover:not(:disabled) { background: #e94560; color: #fff; }
 .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.error { color: #d32f2f; font-size: 13px; }
+.error { color: var(--akiba-danger-text); font-size: 13px; }
 .success { color: #388e3c; font-size: 13px; }
 
 .key-list {
-  background: #fafafa;
-  border: 1px solid #eee;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.key-list label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.key-list label { font-size: 12px; color: var(--akiba-chat-text-faint); text-transform: uppercase; letter-spacing: 0.5px; }
 .key-item {
   font-size: 13px;
-  color: #444;
+  color: var(--vscode-editor-foreground);
 }
 .key-meta {
   margin-right: 6px;
@@ -1855,8 +1855,8 @@ function handleTabKey(e: KeyboardEvent) {
 .mode-toggle .btn-sm {
   padding: 8px 16px;
   border: none;
-  background: #fff;
-  color: #666;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-descriptionForeground);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1868,13 +1868,13 @@ function handleTabKey(e: KeyboardEvent) {
 
 /* GUI sections */
 .gui-editor {
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .config-section {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
 }
 .config-section:last-child { border-bottom: none; }
 
@@ -1882,15 +1882,15 @@ function handleTabKey(e: KeyboardEvent) {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #444;
-  background: #fafafa;
+  color: var(--vscode-editor-foreground);
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   cursor: pointer;
   user-select: none;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.config-section summary:hover { background: #f5f5f5; }
+.config-section summary:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .config-section .badge {
   font-size: 11px;
   background: #e94560;
@@ -1907,8 +1907,8 @@ function handleTabKey(e: KeyboardEvent) {
 
 /* Task items */
 .task-item {
-  background: #fafafa;
-  border: 1px solid #eee;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 10px;
@@ -1918,7 +1918,7 @@ function handleTabKey(e: KeyboardEvent) {
   align-items: flex-end;
 }
 
-.btn-sm { padding: 6px 12px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; }
+.btn-sm { padding: 6px 12px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px; background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); cursor: pointer; }
 .btn-sm.active { background: #e94560; color: #fff; border-color: #e94560; }
 .btn-sm.sm { padding: 4px 8px; font-size: 11px; }
 .btn-secondary.sm { padding: 6px 14px; font-size: 12px; }
@@ -1927,10 +1927,10 @@ function handleTabKey(e: KeyboardEvent) {
 .flex2 { flex: 2; }
 .inline-check { align-items: flex-end; }
 .readonly-input {
-  background: #f5f5f5 !important;
-  color: #888 !important;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent) !important;
+  color: var(--akiba-chat-text-faint) !important;
   cursor: not-allowed !important;
-  border-color: #e8e8e8 !important;
+  border-color: var(--akiba-chat-surface-alt) !important;
 }
 
 .llm-import-row {
@@ -1939,14 +1939,14 @@ function handleTabKey(e: KeyboardEvent) {
   gap: 10px;
   padding: 8px 16px;
   margin-bottom: 12px;
-  background: #f8f9fa;
-  border: 1px solid #e8e8e8;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
 }
 .import-label {
   font-size: 12px;
   font-weight: 500;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   white-space: nowrap;
   margin-bottom: 0;
 }
@@ -1957,7 +1957,7 @@ function handleTabKey(e: KeyboardEvent) {
   border-radius: 5px;
   font-size: 13px;
   font-family: inherit;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .inline-check label {
@@ -1986,7 +1986,7 @@ function handleTabKey(e: KeyboardEvent) {
   display: block;
   font-size: 12px;
   font-weight: 500;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   margin-bottom: 4px;
 }
 .form-group input,
@@ -1997,7 +1997,7 @@ function handleTabKey(e: KeyboardEvent) {
   border-radius: 5px;
   font-size: 13px;
   font-family: inherit;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
 }
 
 .json-editor {
@@ -2023,7 +2023,7 @@ function handleTabKey(e: KeyboardEvent) {
 /* Task module config editor */
 .task-module-config {
   margin-top: 10px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -2031,12 +2031,12 @@ function handleTabKey(e: KeyboardEvent) {
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #555;
-  background: #f5f5f5;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   cursor: pointer;
   user-select: none;
 }
-.task-module-config summary:hover { background: #f0f0f0; }
+.task-module-config summary:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .task-module-config .badge {
   font-size: 10px;
   background: #e94560;

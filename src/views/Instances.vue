@@ -424,14 +424,14 @@ async function deleteInstance(name: string) {
   cursor: pointer;
 }
 .btn-secondary {
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
 }
 .input-group button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .loading, .empty {
   padding: 24px;
-  color: #777;
+  color: var(--akiba-chat-text-faint);
   text-align: center;
 }
 
@@ -444,9 +444,9 @@ async function deleteInstance(name: string) {
 .table th, .table td {
   text-align: left;
   padding: 10px 12px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
 }
-.table th { color: #666; font-weight: 500; }
+.table th { color: var(--vscode-descriptionForeground); font-weight: 500; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
 .status {
@@ -455,23 +455,23 @@ async function deleteInstance(name: string) {
   padding: 2px 8px;
   border-radius: 10px;
   margin-right: 6px;
-  background: #eee;
-  color: #666;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-descriptionForeground);
 }
-.status.active { background: #e8f5e9; color: #2e7d32; }
-.status.muted { background: #f5f5f5; color: #888; }
+.status.active { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-success-text); }
+.status.muted { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-chat-text-faint); }
 
 .btn-action {
   padding: 5px 10px;
   margin-right: 6px;
   font-size: 12px;
   border: 1px solid #ddd;
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 5px;
   cursor: pointer;
 }
-.btn-action:hover { background: #fafafa; }
-.btn-action.danger { color: #d32f2f; border-color: #f0c0c0; }
+.btn-action:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
+.btn-action.danger { color: var(--akiba-danger-text); border-color: #f0c0c0; }
 
 .message {
   margin-top: 16px;
@@ -479,8 +479,8 @@ async function deleteInstance(name: string) {
   border-radius: 6px;
   font-size: 13px;
 }
-.message.success { background: #e8f5e9; color: #2e7d32; }
-.message.error { background: #fdecea; color: #c62828; }
+.message.success { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-success-text); }
+.message.error { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); color: var(--akiba-danger-text); }
 
 .modal {
   position: fixed;
@@ -492,7 +492,7 @@ async function deleteInstance(name: string) {
   z-index: 100;
 }
 .modal-content {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 28px;
   border-radius: 10px;
   width: 460px;
@@ -502,8 +502,8 @@ async function deleteInstance(name: string) {
 }
 .modal-content.wide { width: 860px; }
 .modal-content h2 { margin: 0 0 10px; font-size: 18px; }
-.danger-title { color: #c62828; }
-.modal-hint { font-size: 13px; color: #666; margin: 0 0 16px; line-height: 1.5; }
+.danger-title { color: var(--akiba-danger-text); }
+.modal-hint { font-size: 13px; color: var(--vscode-descriptionForeground); margin: 0 0 16px; line-height: 1.5; }
 
 .form-group { margin-bottom: 14px; }
 .form-group label {
@@ -551,7 +551,7 @@ async function deleteInstance(name: string) {
 }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.error { color: #d32f2f; font-size: 13px; margin-top: 8px; }
+.error { color: var(--akiba-danger-text); font-size: 13px; margin-top: 8px; }
 
 .field-hint { color: #b26a00; font-size: 12px; margin: 6px 0 0; }
 </style>

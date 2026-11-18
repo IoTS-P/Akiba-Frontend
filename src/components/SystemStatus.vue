@@ -89,7 +89,7 @@ onUnmounted(() => {
 .gauge-track {
   width: 44px;
   height: 5px;
-  background: #eef0f3;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 3px;
   overflow: hidden;
 }

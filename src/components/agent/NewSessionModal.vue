@@ -384,14 +384,14 @@ async function createSession() {
 }
 .btn-secondary {
   padding: 10px 20px;
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 .muted {
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   text-align: center;
   padding: 14px;
 }
@@ -412,7 +412,7 @@ async function createSession() {
   z-index: 100;
 }
 .modal-content {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 30px;
   border-radius: 10px;
   width: 500px;
@@ -422,13 +422,13 @@ async function createSession() {
 }
 .modal-content.wide { width: 650px; }
 .modal-content h2 { margin-bottom: 6px; font-size: 20px; }
-.subtitle { color: #666; font-size: 13px; margin: 0 0 18px; }
+.subtitle { color: var(--vscode-descriptionForeground); font-size: 13px; margin: 0 0 18px; }
 
 .session-mode-tabs {
   display: flex;
   gap: 0;
   margin-bottom: 16px;
-  border-bottom: 2px solid #eee;
+  border-bottom: 2px solid var(--akiba-chat-surface-alt);
 }
 .tab-btn {
   padding: 8px 18px;
@@ -438,10 +438,10 @@ async function createSession() {
   margin-bottom: -2px;
   cursor: pointer;
   font-size: 13px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   transition: color 0.15s, border-color 0.15s;
 }
-.tab-btn:hover { color: #555; }
+.tab-btn:hover { color: var(--vscode-descriptionForeground); }
 .tab-btn.active {
   color: #e94560;
   border-bottom-color: #e94560;
@@ -449,9 +449,9 @@ async function createSession() {
 }
 
 .no-llm-warning {
-  background: #fff3cd;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #ffeeba;
-  color: #856404;
+  color: var(--akiba-warning-text);
   padding: 12px 16px;
   border-radius: 6px;
   font-size: 13px;
@@ -488,12 +488,12 @@ async function createSession() {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #444;
+  color: var(--vscode-editor-foreground);
 }
 .project-hint { margin-top: 6px; }
 .project-error { margin-top: 6px; font-size: 12px; }
 .modal-error {
-  background: #ffebee;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border: 1px solid #ffcdd2;
   border-radius: 6px;
   padding: 10px 12px;
@@ -503,7 +503,7 @@ async function createSession() {
 .file-list {
   max-height: 300px;
   overflow-y: auto;
-  border: 1px solid #eee;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 6px;
   margin-bottom: 16px;
 }
@@ -512,20 +512,20 @@ async function createSession() {
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
   cursor: pointer;
 }
-.file-item:hover { background: #fafafa; }
-.file-item.selected { background: #fff5f7; border-left: 3px solid #e94560; }
+.file-item:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
+.file-item.selected { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); border-left: 3px solid #e94560; }
 .file-item:last-child { border-bottom: none; }
 .file-name { font-size: 14px; font-weight: 500; }
 .file-meta { display: flex; gap: 6px; align-items: center; }
 .tag {
   font-size: 11px;
   padding: 2px 8px;
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-radius: 4px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   white-space: nowrap;
 }
 
@@ -537,17 +537,17 @@ async function createSession() {
 }
 .btn-secondary {
   padding: 10px 20px;
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
-.btn-secondary:hover:not(:disabled) { background: #eee; }
+.btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .error {
-  color: #d32f2f;
+  color: var(--akiba-danger-text);
   font-size: 13px;
   margin: 8px 0;
 }

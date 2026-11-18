@@ -152,7 +152,7 @@ async function createInstance() {
 }
 
 .card {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 36px 40px;
   border-radius: 12px;
   width: 480px;
@@ -167,7 +167,7 @@ async function createInstance() {
 }
 
 .subtitle {
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   font-size: 14px;
   margin-bottom: 22px;
   line-height: 1.55;
@@ -177,7 +177,7 @@ async function createInstance() {
   list-style: none;
   padding: 0;
   margin: 0 0 16px;
-  border: 1px solid #eee;
+  border: 1px solid var(--akiba-chat-surface-alt);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -188,18 +188,18 @@ async function createInstance() {
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
   transition: background 0.15s;
 }
 .instance-list li:last-child { border-bottom: none; }
-.instance-list li:hover { background: #fafafa; }
+.instance-list li:hover { background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent); }
 .instance-list li.active {
-  background: #fff5f7;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   border-left: 3px solid #e94560;
   padding-left: 13px;
 }
 
-.name { font-weight: 500; color: #222; }
+.name { font-weight: 500; color: var(--vscode-editor-foreground); }
 .meta { display: flex; align-items: center; gap: 10px; }
 .badge {
   font-size: 11px;
@@ -208,8 +208,8 @@ async function createInstance() {
   color: #fff;
   border-radius: 10px;
 }
-.state { font-size: 12px; color: #999; }
-.state.running { color: #2e7d32; }
+.state { font-size: 12px; color: var(--akiba-chat-text-faint); }
+.state.running { color: var(--akiba-success-text); }
 
 .actions-row {
   display: flex;
@@ -231,8 +231,8 @@ async function createInstance() {
 
 .btn-secondary {
   padding: 10px 18px;
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -250,7 +250,7 @@ async function createInstance() {
 .btn-link:hover { text-decoration: underline; }
 
 .error {
-  color: #d32f2f;
+  color: var(--akiba-danger-text);
   font-size: 13px;
   margin-top: 12px;
   text-align: center;
@@ -266,7 +266,7 @@ async function createInstance() {
   z-index: 100;
 }
 .modal-content {
-  background: #fff;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
   padding: 28px;
   border-radius: 10px;
   width: 400px;
@@ -289,7 +289,7 @@ async function createInstance() {
   font-size: 14px;
   box-sizing: border-box;
 }
-.hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+.hint { font-size: 12px; color: var(--akiba-chat-text-faint); margin: 6px 0 0; }
 
 .modal-actions {
   display: flex;

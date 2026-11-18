@@ -4420,7 +4420,7 @@ watch(
 
 .msg.assistant .content {
   background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
-  color: #222;
+  color: var(--vscode-editor-foreground);
   border-bottom-left-radius: 4px;
 }
 
@@ -5083,7 +5083,7 @@ watch(
 .chat-title-name {
   font-size: 15px;
   font-weight: 600;
-  color: #222;
+  color: var(--vscode-editor-foreground);
   max-width: 380px;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -8,7 +8,6 @@ import type {
   Script,
   ScriptExecution,
   ScriptRunResponse,
-  QueryResponse,
   AgentSession,
   AgentMessage,
   ChatTurnResponse,
@@ -536,12 +535,6 @@ export const skillApi = {
   readFile: (skillId: string, path: string, maxChars = 20000) =>
     api.get<SkillReadResult>(`/skills/${encodeURIComponent(skillId)}/file`, { params: { path, maxChars } }),
   delete: (skillId: string) => api.delete<{ message: string }>(`/skills/${encodeURIComponent(skillId)}`)
-}
-
-export const queryApi = {
-  execute: (sql: string, instanceName?: string) =>
-    api.post<QueryResponse>('/query', { sql, instanceName }),
-  history: () => api.get<{ message: string }>('/query/history')
 }
 
 export const healthApi = {

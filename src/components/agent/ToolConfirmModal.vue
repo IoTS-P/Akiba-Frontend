@@ -111,14 +111,14 @@ function formatMinutes(seconds: number): string {
 }
 .btn-secondary {
   padding: 10px 20px;
-  background: #f5f5f5;
-  color: #333;
+  background: color-mix(in srgb, var(--akiba-chat-surface-alt) 55%, transparent);
+  color: var(--vscode-editor-foreground);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 .muted {
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   text-align: center;
   padding: 14px;
 }
