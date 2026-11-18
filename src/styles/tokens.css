@@ -41,6 +41,15 @@
   --akiba-danger: #c62828;
   --akiba-danger-hover: #d32f2f;
 
+
+  /* ---- status colours that stay readable on a dark surface ------------- */
+  --akiba-info-text: #7fb0ff;
+  --akiba-success-text: #8bd18b;
+  --akiba-warning-text: #ffce80;
+  --akiba-danger-text: #ff8f8f;
+  --akiba-purple: #8b7bd8;
+  --akiba-purple-text: #c9b6ff;
+
   /* ---- shape and rhythm ------------------------------------------------- */
   --akiba-radius-sm: 4px;
   --akiba-radius-md: 6px;

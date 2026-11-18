@@ -1,0 +1,53 @@
+/*
+ * Base layer: what the browser would otherwise decide for itself.
+ *
+ * Form controls default to a white box with black text, which is the one thing that
+ * cannot be themed from a component: every input, select and textarea inherits it.
+ */
+
+body {
+  background: var(--akiba-chat-bg);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--akiba-font-family);
+  font-size: var(--akiba-font-ui);
+  line-height: var(--akiba-line-height);
+}
+
+input,
+textarea,
+select {
+  background: var(--vscode-input-background);
+  color: var(--vscode-editor-foreground);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--akiba-radius-sm);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: inherit;
+  color-scheme: dark;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--vscode-disabledForeground);
+}
+
+select option {
+  background: var(--vscode-input-background);
+  color: var(--vscode-editor-foreground);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
