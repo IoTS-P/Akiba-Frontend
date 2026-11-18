@@ -138,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
@@ -252,6 +252,11 @@ interface FileTab {
 }
 
 const fileTabs = ref<FileTab[]>([])
+// Choosing another activity is a request to see that activity: a file tab must not keep the
+// editor hostage while the sidebar has already moved on.
+watch(() => route.fullPath, () => {
+  activeKey.value = 'view'
+})
 const activeKey = ref<string>('view')
 const saveTimers = new Map<string, number>()
 /** Files being read right now, so a double click cannot open the same file twice. */
