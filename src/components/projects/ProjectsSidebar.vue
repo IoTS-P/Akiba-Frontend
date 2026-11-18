@@ -23,7 +23,11 @@
         >
           <span class="chevron">{{ open.has(p.name) ? '▾' : '▸' }}</span>
           <span class="name">{{ p.name }}</span>
-          <span class="count">{{ p.programCount ?? '' }}</span>
+          <!-- The project is locked while files are imported; say so instead of showing an error. -->
+          <span v-if="importing[p.name]" class="importing">
+            <span class="spinner"></span>importing files
+          </span>
+          <span v-else class="count">{{ p.programCount ?? '' }}</span>
         </div>
 
         <template v-if="open.has(p.name)">
@@ -89,6 +93,8 @@ const query = ref('')
 const selectedProject = ref<string | null>(null)
 const error = ref('')
 const dragOver = ref(false)
+/** Projects with an import running; the project is locked by Ghidra until it finishes. */
+const importing = reactive<Record<string, boolean>>({})
 
 function rootsOf(project: string): Entry[] {
   const all = entriesByProject[project] ?? []
@@ -133,8 +139,12 @@ async function reload(name: string) {
   try {
     const { data } = await projectApi.tree(name)
     entriesByProject[name] = data.entries
-  } catch {
-    error.value = `Could not read project ${name}.`
+  } catch (e: any) {
+    const message = e?.response?.data?.error || ''
+    // While an import holds the project, reading its tree fails. That is expected, not news.
+    if (!(importing[name] && /in use/i.test(message))) {
+      error.value = message || `Could not read project ${name}.`
+    }
   } finally {
     loading[name] = false
   }
@@ -181,6 +191,7 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
   error.value = ''
+  importing[project] = true
   try {
     for (const file of files) {
       const form = new FormData()
@@ -194,9 +205,11 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
       }
       await projectApi.importBinary(project, { binaryId: String(id), folder })
     }
-    await reload(project)
   } catch (e: any) {
     error.value = e?.response?.data?.error || 'Import failed.'
+  } finally {
+    importing[project] = false
+    await reload(project)
   }
 }
 
@@ -354,6 +367,28 @@ void emit
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.importing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--akiba-info-text);
+}
+
+.spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid color-mix(in srgb, var(--akiba-info-text) 35%, transparent);
+  border-top-color: var(--akiba-info-text);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .count {
