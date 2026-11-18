@@ -254,6 +254,17 @@ export const agentApi = {
         kind?: string
       }>
     }>(`/agent/sessions/${sessionId}/stream-chunks`, { params: { since } }),
+  /**
+   * Ask the tool this session is running to stop, without ending the turn.
+   *
+   * The agent gets an observation saying the work was cut short, so it can decide
+   * what to do next instead of assuming the output it never saw is complete.
+   */
+  interruptTool: (sessionId: string) =>
+    api.post<{ interrupted: boolean; runningHere: boolean }>(
+      `/agent/sessions/${sessionId}/tool/interrupt`,
+      {},
+    ),
   deleteSession: (sessionId: string) =>
     api.delete<{ message: string }>(`/agent/sessions/${sessionId}`),
   /**

@@ -403,8 +403,13 @@
             <div v-for="t in liveTools" :key="t.id" class="live-tool">
               <span class="live-tool-spinner"></span>
               <span class="live-tool-name">{{ t.name }}</span>
-              <span class="live-tool-args">{{ t.args }}</span>
+              <span class="live-tool-args">{{ t.summary }}</span>
               <span class="live-tool-elapsed">{{ elapsedLabel(t.startedAt) }}</span>
+              <button
+                class="live-tool-stop"
+                :disabled="stoppingTools.has(t.id)"
+                @click="stopTool(t.id)"
+              >Stop</button>
             </div>
           </div>
           <!-- Transient messages after the last server message (not yet answered) -->
@@ -2279,12 +2284,17 @@ async function onComposerStop() {
 interface LiveTool {
   id: string
   name: string
+  /** Raw argument JSON, kept for debugging. */
   args: string
+  /** One line saying what this call is doing, for the card. */
+  summary: string
   startedAt: number
 }
 
 /** Tool calls that are running right now, in start order. */
 const liveTools = ref<LiveTool[]>([])
+/** Cards whose stop button has been pressed and is waiting for the tool to end. */
+const stoppingTools = ref<Set<string>>(new Set())
 /** Bumped once a second so the live timers advance. */
 const clockTick = ref(Date.now())
 let clockTimer: ReturnType<typeof setInterval> | null = null
@@ -2307,6 +2317,44 @@ function elapsedLabel(startedAt: number): string {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`
 }
 
+/**
+ * Turn a tool's argument JSON into the one line a person needs to read.
+ *
+ * A shell call is its command; anything else is a couple of `key=value` pairs, which is
+ * enough to tell two calls apart without showing the whole JSON blob.
+ */
+function describeToolArgs(raw: string): string {
+  let parsed: Record<string, unknown> | null = null
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return raw
+  }
+  if (!parsed || typeof parsed !== 'object') return raw
+  const direct = parsed.command ?? parsed.cmd ?? parsed.script ?? parsed.path
+  if (typeof direct === 'string' && direct) return direct
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value === null || value === undefined || value === '') continue
+    parts.push(`${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    if (parts.length === 2) break
+  }
+  return parts.join('  ')
+}
+
+/** Ask the tool this session is running to stop; the turn keeps going. */
+async function stopTool(id: string) {
+  const sessionId = activeSessionId.value
+  if (!sessionId) return
+  stoppingTools.value = new Set(stoppingTools.value).add(id)
+  try {
+    await agentApi.interruptTool(sessionId)
+  } catch {
+    // The card leaves on its own when the tool ends; nothing to report here.
+    stoppingTools.value = new Set([...stoppingTools.value].filter(x => x !== id))
+  }
+}
+
 /** Fold a tool_start / tool_end event into the live list. */
 function applyToolEvent(kind: string, payload: string) {
   let info: { id?: string; name?: string; args?: string } | null = null
@@ -2321,12 +2369,21 @@ function applyToolEvent(kind: string, payload: string) {
     if (!liveTools.value.some(t => t.id === id)) {
       liveTools.value = [
         ...liveTools.value,
-        { id, name: info?.name ?? 'tool', args: info?.args ?? '', startedAt: Date.now() },
+        {
+          id,
+          name: info?.name ?? 'tool',
+          args: info?.args ?? '',
+          summary: describeToolArgs(info?.args ?? ''),
+          startedAt: Date.now(),
+        },
       ]
     }
     startClock()
   } else {
     liveTools.value = liveTools.value.filter(t => t.id !== id)
+    if (stoppingTools.value.has(id)) {
+      stoppingTools.value = new Set([...stoppingTools.value].filter(x => x !== id))
+    }
     if (!liveTools.value.length) stopClock()
   }
 }
@@ -4562,6 +4619,27 @@ watch(
 
 /* LLM selector + composer */
 /* Wide enough for the longest label so stopping never shifts the composer. */
+.live-tool-stop {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim, #9aa0a6);
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.live-tool-stop:hover:not(:disabled) {
+  color: #e06c6c;
+}
+
+.live-tool-stop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .live-tools {
   display: flex;
   flex-direction: column;
