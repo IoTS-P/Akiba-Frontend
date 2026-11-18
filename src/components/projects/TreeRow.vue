@@ -134,14 +134,15 @@ async function copyPath() {
  */
 function askDestination(verb: string): { project: string; folder: string } | null {
   const answer = window.prompt(
-    `${verb} to (project:/folder, leave the project empty for "${props.project}")`,
-    `${props.project}:/`,
+    `${verb} to (project:/folder — leave the folder empty for the project root)`,
+    `${props.project}:`,
   )
   if (!answer) return null
   const [projectPart, ...rest] = answer.split(':')
   const project = projectPart.trim() || props.project
-  const folder = rest.join(':').trim()
-  return { project, folder: folder === '' ? '/' : folder }
+  const raw = rest.join(':').trim()
+  // The project root is the empty folder, not "/": Ghidra has folders, not a root record.
+  return { project, folder: raw === '/' ? '' : raw }
 }
 
 async function copyEntry(withWorkspace: boolean) {
