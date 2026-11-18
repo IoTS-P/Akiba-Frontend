@@ -32,11 +32,12 @@
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
       <!-- Agent lists conversations; the other activities still list their views. -->
-      <div v-if="isAgentActivity || isProjectsActivity" class="sidebar-split">
+      <div v-if="isAgentActivity || isProjectsActivity || isFilesActivity" class="sidebar-split">
         <ProjectsSidebar
           v-if="isProjectsActivity"
           @open-workspace="openProgramWorkspace"
         />
+        <FilesSidebar v-else-if="isFilesActivity" />
         <AgentSidebar
           v-else-if="isAgentActivity"
           :active-id="activeSessionId"
@@ -63,7 +64,7 @@
       <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
-      <nav v-if="!isAgentActivity && !isProjectsActivity" class="nav">
+      <nav v-if="!isAgentActivity && !isProjectsActivity && !isFilesActivity" class="nav">
         <button
           v-for="item in filteredViews"
           :key="item.path"
@@ -146,6 +147,7 @@ import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
 import ProjectsSidebar from '@/components/projects/ProjectsSidebar.vue'
+import FilesSidebar from '@/components/files/FilesSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { workspaceApi, type WorkspaceScope } from '@/services/workspace'
@@ -199,6 +201,7 @@ function go(path: string) {
 /** The agent activity owns its own sidebar: a list of conversations. */
 const isAgentActivity = computed(() => route.path.startsWith('/agent'))
 const isProjectsActivity = computed(() => route.path.startsWith('/projects'))
+const isFilesActivity = computed(() => route.path.startsWith('/files'))
 
 /** The program whose workspace is open below the project tree, if any. */
 const programScope = ref<WorkspaceScope | null>(null)
