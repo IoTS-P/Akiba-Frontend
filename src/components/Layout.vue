@@ -132,31 +132,24 @@
         <router-view />
       </div>
 
-      <div v-if="activeScript" class="file-body">
+      <div v-if="activeDoc" class="file-body">
         <WorkspaceEditor
-          ref="editorRef"
-          v-model="scriptText"
-          language="kotlin"
-          :uri="activeScript.uri"
-          @save="saveScript"
-        />
-      </div>
-
-      <!-- One editor serves every tab; a tab is a document, not an editor. -->
-      <div v-if="activeFile" class="file-body">
-        <WorkspaceEditor
-          v-if="!activeFile.binary"
-          ref="fileEditorRef"
-          :language="activeFile.language"
-          :uri="activeFile.uri"
-          :model-value="activeFile.content"
-          @update:model-value="onEdit(activeFile, $event)"
-          @save="saveTab(activeFile)"
+          v-if="activeDoc.text !== null"
+          ref="docEditorRef"
+          :uri="activeDoc.uri"
+          :language="activeDoc.language"
+          @update:model-value="onDocEdit"
+          @save="saveActiveDoc"
         />
         <div v-else class="file-note-block">
           This file is not text. Download it from the workspace tree to inspect it.
         </div>
       </div>
+
+      <div v-show="activeKey === 'view'" class="content">
+        <router-view />
+      </div>
+
     </main>
   </div>
 </template>
@@ -307,8 +300,52 @@ interface ScriptTab {
 const fileTabs = ref<FileTab[]>([])
 const scriptTabs = ref<ScriptTab[]>([])
 const scriptText = ref('')
-const editorRef = ref<{ setText: (t: string) => void } | null>(null)
-const fileEditorRef = ref<{ setText: (t: string) => void } | null>(null)
+const docEditorRef = ref<{ setText: (t: string) => void } | null>(null)
+
+interface ActiveDoc {
+  uri: string
+  language: string
+  /** null means the document cannot be shown as text. */
+  text: string | null
+  kind: 'file' | 'script'
+}
+
+const activeDoc = computed<ActiveDoc | null>(() => {
+  const script = activeScript.value
+  if (script) return { uri: script.uri, language: 'kotlin', text: scriptText.value, kind: 'script' }
+  const file = activeFile.value
+  if (!file) return null
+  return {
+    uri: file.uri,
+    language: file.language,
+    text: file.binary ? null : file.content,
+    kind: 'file',
+  }
+})
+
+function onDocEdit(text: string) {
+  const doc = activeDoc.value
+  if (!doc) return
+  if (doc.kind === 'script') {
+    scriptText.value = text
+    return
+  }
+  const file = activeFile.value
+  if (file) onEdit(file, text)
+}
+
+/** Hand the current text to the editor, whichever document is showing. */
+async function pushActiveText() {
+  await nextTick()
+  const doc = activeDoc.value
+  if (!doc || doc.text === null) return
+  docEditorRef.value?.setText(doc.text)
+}
+
+function saveActiveDoc() {
+  if (activeDoc.value?.kind === 'script') void saveScript()
+  else if (activeFile.value) void saveTab(activeFile.value)
+}
 const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.value) ?? null)
 const activeScript = computed(() => scriptTabs.value.find(t => t.key === activeKey.value) ?? null)
 
@@ -332,7 +369,7 @@ async function loadScriptText(id: number) {
     const { data } = await scriptApi.get(id)
     scriptText.value = textOf(`akiba://script/${id}`) ?? data.code ?? ''
     await nextTick()
-    editorRef.value?.setText(scriptText.value)
+    await pushActiveText()
   } catch {
     scriptText.value = ''
   }
@@ -381,14 +418,14 @@ watch(activeScript, async tab => {
   if (!tab) return
   await loadScriptText(tab.id)
   await nextTick()
-  editorRef.value?.setText(scriptText.value)
+  await pushActiveText()
 })
 
 // Whichever tab is showing, its text is pushed after the editor exists.
 watch(activeFile, async tab => {
   if (!tab || tab.binary) return
   await nextTick()
-  fileEditorRef.value?.setText(tab.content)
+  await pushActiveText()
 })
 const activeKey = ref<string>('view')
 const saveTimers = new Map<string, number>()

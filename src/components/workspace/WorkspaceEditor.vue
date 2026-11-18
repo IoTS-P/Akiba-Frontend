@@ -23,13 +23,14 @@ self.MonacoEnvironment = {
   },
 }
 
-const props = defineProps<{
-  modelValue: string
+const props = withDefaults(defineProps<{
+  /** Optional: the owner usually pushes text through setText after the document loads. */
+  modelValue?: string
   language: string
   /** Stable identity of the document; two tabs with the same uri share one model. */
   uri: string
   readOnly?: boolean
-}>()
+}>(), { modelValue: '', readOnly: false })
 const emit = defineEmits<{ 'update:modelValue': [string]; save: [] }>()
 
 const host = ref<HTMLElement | null>(null)
