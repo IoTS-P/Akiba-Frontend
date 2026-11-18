@@ -3561,7 +3561,7 @@ watch(
 .session-list {
   display: flex;
   flex-direction: row;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
@@ -3641,11 +3641,11 @@ watch(
   flex-wrap: wrap;
   gap: 6px;
   font-size: 11px;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   min-width: 0;
 }
 .session-hover-card .hover-card-time {
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   font-variant-numeric: tabular-nums;
 }
 .session-hover-card .hover-card-uuid {
@@ -3653,7 +3653,7 @@ watch(
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   /* Wrap long UUIDs to multiple lines instead of overflowing the
      ~244px card width.  `word-break: break-all` makes sure a long
      hex string still wraps cleanly. */
@@ -3661,7 +3661,7 @@ watch(
 }
 .session-hover-card .hover-card-uuid-label {
   flex-shrink: 0;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   font-weight: 500;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -3669,8 +3669,8 @@ watch(
 .session-hover-card .hover-card-uuid-value {
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 10px;
-  color: #444;
-  background: #fff;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editorWidget-background);
   border: 1px solid #e0e2e6;
   border-radius: 3px;
   padding: 1px 4px;
@@ -3720,10 +3720,10 @@ watch(
   padding: 10px 0;
   background: none;
   border: none;
-  border-left: 1px solid #e8e8e8;
+  border-left: 1px solid var(--akiba-chat-surface-alt);
   cursor: pointer;
   flex-shrink: 0;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   font-size: 12px;
 }
 .session-list-toggle:hover {
@@ -3731,7 +3731,7 @@ watch(
 }
 .session-list-toggle-icon {
   font-size: 10px;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
 }
 .session-list-toggle-label {
   position: relative;
@@ -3785,9 +3785,9 @@ watch(
   margin-bottom: 4px;
   border: 1px solid transparent;
 }
-.sessions li:hover { background: #fafafa; }
+.sessions li:hover { background: var(--akiba-chat-hover); }
 .sessions li.active {
-  background: #fff5f7;
+  background: color-mix(in srgb, var(--akiba-accent) 14%, transparent);
   border-color: var(--vscode-button-background);
 }
 .sessions li .title {
@@ -3803,7 +3803,7 @@ watch(
   display: inline-block;
   font-size: 10px;
   font-weight: 500;
-  background: #e3f2fd;
+  background: color-mix(in srgb, var(--akiba-info) 18%, transparent);
   color: #1976d2;
   padding: 1px 6px;
   border-radius: 4px;
@@ -3825,7 +3825,7 @@ watch(
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 .sessions li .del {
   position: absolute;
@@ -3833,7 +3833,7 @@ watch(
   right: 6px;
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
@@ -3844,7 +3844,7 @@ watch(
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: #f0f0f0;
+  background: var(--akiba-chat-surface-alt);
 }
 /* The `status` field mirrors the runtime_state enum. Non-terminal
    states share the "in-progress" pill. Terminal states fall through
@@ -3854,12 +3854,12 @@ watch(
 .status.standby,
 .status.msghandle,
 .status.cancelling,
-.status.active { background: #e3f2fd; color: #1976d2; }
+.status.active { background: color-mix(in srgb, var(--akiba-info) 18%, transparent); color: #1976d2; }
 .status.closed,
-.status.completed { background: #e8f5e9; color: #388e3c; }
-.status.cancelled { background: #f5f5f5; color: #777; }
+.status.completed { background: color-mix(in srgb, var(--akiba-success) 18%, transparent); color: #388e3c; }
+.status.cancelled { background: var(--vscode-editor-background); color: var(--akiba-chat-text-faint); }
 .status.error,
-.status.failed { background: #ffebee; color: #d32f2f; }
+.status.failed { background: color-mix(in srgb, var(--akiba-danger) 16%, transparent); color: #d32f2f; }
 
 /* ---------------------------------------------------------------
    `status-row` — session-list badge with a leading pulse dot for
@@ -3875,8 +3875,8 @@ watch(
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 9px;
-  background: #f0f0f0;
-  color: #555;
+  background: var(--akiba-chat-surface-alt);
+  color: var(--vscode-descriptionForeground);
   line-height: 1;
   letter-spacing: 0.2px;
 }
@@ -3895,29 +3895,29 @@ watch(
   50%      { opacity: 1;    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.18); }
 }
 .status-row.status-row-active {
-  background: #e3f2fd;
+  background: color-mix(in srgb, var(--akiba-info) 18%, transparent);
   color: #1976d2;
   box-shadow: 0 0 0 1px rgba(25, 118, 210, 0.18);
 }
 .status-row.closed,
 .status-row.completed {
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--akiba-success) 18%, transparent);
   color: #2e7d32;
   box-shadow: none;
 }
 .status-row.cancelled {
-  background: #f5f5f5;
-  color: #777;
+  background: var(--vscode-editor-background);
+  color: var(--akiba-chat-text-faint);
   box-shadow: none;
 }
 .status-row.error,
 .status-row.failed {
-  background: #ffebee;
+  background: color-mix(in srgb, var(--akiba-danger) 16%, transparent);
   color: #c62828;
   box-shadow: none;
 }
 .status-row.cancelling {
-  background: #fff3e0;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   color: #e65100;
 }
 .status-row.msghandle {
@@ -3940,8 +3940,8 @@ watch(
   font-weight: 600;
   padding: 5px 12px;
   border-radius: 999px;
-  background: #f0f0f0;
-  color: #555;
+  background: var(--akiba-chat-surface-alt);
+  color: var(--vscode-descriptionForeground);
   line-height: 1;
   letter-spacing: 0.3px;
   white-space: nowrap;
@@ -3968,7 +3968,7 @@ watch(
 /* Non-terminal (running/standby/msghandle/cancelling/active) —
    the live states where the user wants visual confirmation. */
 .status-pill.status-pill-non-terminal {
-  background: #e3f2fd;
+  background: color-mix(in srgb, var(--akiba-info) 18%, transparent);
   color: #1565c0;
   box-shadow: 0 1px 3px rgba(25, 118, 210, 0.25);
 }
@@ -3977,15 +3977,15 @@ watch(
 .pause-btn, .resume-btn {
   font-size: 12px;
   padding: 3px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s, border-color 0.1s;
 }
-.pause-btn:hover { background: #fff3e0; border-color: #ff9800; }
-.resume-btn:hover { background: #e3f2fd; border-color: #1976d2; }
+.pause-btn:hover { background: color-mix(in srgb, var(--akiba-warning) 18%, transparent); border-color: #ff9800; }
+.resume-btn:hover { background: color-mix(in srgb, var(--akiba-info) 18%, transparent); border-color: #1976d2; }
 .pause-btn:disabled, .resume-btn:disabled { opacity: 0.5; cursor: wait; }
 .cancel-chat-btn {
   font-size: 12px;
@@ -4000,7 +4000,7 @@ watch(
   box-shadow: 0 1px 3px rgba(0, 150, 136, 0.25);
 }
 .status-pill.status-pill-paused {
-  background: #fff3e0;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   color: #e65100;
   box-shadow: 0 1px 3px rgba(255, 152, 0, 0.25);
 }
@@ -4017,7 +4017,7 @@ watch(
   50%      { opacity: 0.95; box-shadow: 0 0 0 3px rgba(0, 150, 136, 0.22); }
 }
 .status-pill.status-pill-cancelling {
-  background: #fff3e0;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   color: #e65100;
   box-shadow: 0 1px 3px rgba(230, 81, 0, 0.25);
 }
@@ -4038,14 +4038,14 @@ watch(
   opacity: 1;
 }
 .status-pill.status-pill-cancelled {
-  background: #f5f5f5;
-  color: #777;
+  background: var(--vscode-editor-background);
+  color: var(--akiba-chat-text-faint);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 .status-pill.status-pill-cancelled .status-pill-dot { animation: none; opacity: 0.6; }
 .status-pill.status-pill-error,
 .status-pill.status-pill-failed {
-  background: #ffebee;
+  background: color-mix(in srgb, var(--akiba-danger) 16%, transparent);
   color: #c62828;
   box-shadow: 0 1px 3px rgba(198, 40, 40, 0.25);
 }
@@ -4054,7 +4054,7 @@ watch(
 
 .chat {
   flex: 1;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
@@ -4078,7 +4078,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--akiba-chat-text-faint);
 }
 
 .messages {
@@ -4127,7 +4127,7 @@ watch(
   align-items: center;
   gap: 6px;
   padding: 4px 14px;
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--akiba-success) 18%, transparent);
   color: #2e7d32;
   border: 1px solid #a5d6a7;
   border-radius: 16px;
@@ -4148,7 +4148,7 @@ watch(
   gap: 8px;
   padding: 8px 14px;
   margin: 6px 0;
-  background: #fff3cd;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   border: 1px solid #ffc107;
   border-radius: 8px;
   font-size: 13px;
@@ -4174,7 +4174,7 @@ watch(
   gap: 8px;
   padding: 8px 14px;
   margin: 6px 0;
-  background: #e3f2fd;
+  background: color-mix(in srgb, var(--akiba-info) 18%, transparent);
   border: 1px solid #64b5f6;
   border-radius: 8px;
   font-size: 13px;
@@ -4188,7 +4188,7 @@ watch(
    still-growing reply. */
 .streaming-live {
   border-left: 3px solid #42a5f5;
-  background: linear-gradient(to right, #f4f9ff 0%, #ffffff 60%);
+  background: linear-gradient(to right, color-mix(in srgb, var(--akiba-info) 12%, transparent) 0%, var(--vscode-editorWidget-background) 60%);
 }
 .streaming-live-time {
   color: #1976d2;
@@ -4248,8 +4248,8 @@ watch(
    preserved partial content is visually distinct from a live
    stream, plus the one-shot marker row below it. */
 .msg.assistant.streaming-live.interrupted .content {
-  background: #fdf3e0;
-  color: #6b5d3f;
+  background: color-mix(in srgb, var(--akiba-warning) 16%, transparent);
+  color: var(--vscode-descriptionForeground);
 }
 .streaming-interrupted {
   display: flex;
@@ -4293,8 +4293,8 @@ watch(
 /* Persisted interrupted-partial row from the DB: same dimmed
    treatment as the live interrupted bubble. */
 .msg.assistant.interrupted-partial .content {
-  background: #fdf3e0;
-  color: #6b5d3f;
+  background: color-mix(in srgb, var(--akiba-warning) 16%, transparent);
+  color: var(--vscode-descriptionForeground);
 }
 .interrupted-badge {
   margin-left: 8px;
@@ -4328,7 +4328,7 @@ watch(
   padding: 4px 12px;
   border: 1px solid #856404;
   border-radius: 4px;
-  background: #fff3cd;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   color: #856404;
   cursor: pointer;
   font-size: 12px;
@@ -4352,7 +4352,7 @@ watch(
   padding: 4px 8px;
   border: 1px solid #a5d6a7;
   border-radius: 16px;
-  background: #e8f5e9;
+  background: color-mix(in srgb, var(--akiba-success) 18%, transparent);
   color: #2e7d32;
   cursor: pointer;
   outline: none;
@@ -4372,8 +4372,8 @@ watch(
 .wake-selector option {
   font-size: 12px;
   padding: 4px;
-  color: #333;
-  background: #fff;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editorWidget-background);
 }
 
 .msg.user {
@@ -4394,12 +4394,12 @@ watch(
 .msg .msg-header .role {
   font-size: 11px;
   font-weight: 600;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   text-transform: uppercase;
 }
 .msg .msg-header .time {
   font-size: 10px;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   font-weight: 400;
 }
 
@@ -4426,7 +4426,7 @@ watch(
 
 .msg.assistant.pending .content {
   font-style: italic;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 
 .msg.tool {
@@ -4434,7 +4434,7 @@ watch(
   max-width: 90%;
 }
 .tool-call {
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
   padding: 0;
   font-size: 12px;
@@ -4443,13 +4443,13 @@ watch(
 }
 .tool-call.status-success { border-color: #a5d6a7; background: #f1f8e9; }
 .tool-call.status-error   { border-color: #ef9a9a; background: #fff5f5; }
-.tool-call.status-default { border-color: #e0e0e0; background: #fafafa; }
+.tool-call.status-default { border-color: var(--vscode-panel-border); background: var(--akiba-chat-hover); }
 .tool-call details { padding: 0; }
 .tool-call summary {
   padding: 6px 12px;
   cursor: pointer;
   font-size: 12px;
-  color: #555;
+  color: var(--vscode-descriptionForeground);
   font-weight: 500;
   user-select: none;
 }
@@ -4465,7 +4465,7 @@ watch(
 .tool-detail {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--vscode-panel-border);
 }
 .tool-params-block {
   /* No border-bottom: the output section below provides the divider
@@ -4474,7 +4474,7 @@ watch(
 .tool-params-block > summary {
   font-size: 10px;
   font-weight: 600;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 6px 10px 4px;
@@ -4494,7 +4494,7 @@ watch(
 .tool-params-block > summary::before {
   content: '▾';
   font-size: 9px;
-  color: #aaa;
+  color: var(--akiba-chat-text-faint);
   display: inline-block;
   transition: transform 0.15s ease;
 }
@@ -4502,19 +4502,19 @@ watch(
   content: '▸';
 }
 .tool-params-block > summary:hover {
-  color: #555;
+  color: var(--vscode-descriptionForeground);
 }
 .tool-section {
   width: 100%;
   min-width: 0;
 }
 .tool-output-section {
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--akiba-chat-surface-alt);
 }
 .tool-label {
   font-size: 10px;
   font-weight: 600;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 6px 10px 4px;
@@ -4560,14 +4560,14 @@ watch(
   align-items: center;
   gap: 10px;
   padding: 6px 16px;
-  background: #f8f9fa;
-  border-top: 1px solid #eee;
+  background: var(--akiba-chat-hover);
+  border-top: 1px solid var(--akiba-chat-surface-alt);
   font-size: 12px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
 }
 .token-label {
   font-weight: 500;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 .token-value {
   background: #eef2f7;
@@ -4584,25 +4584,25 @@ watch(
   gap: 6px;
   padding: 4px 14px;
   font-size: 11px;
-  color: #666;
-  border-top: 1px solid #eee;
+  color: var(--vscode-descriptionForeground);
+  border-top: 1px solid var(--akiba-chat-surface-alt);
   min-height: 22px;
 }
-.token-label { font-weight: 500; color: #888; margin-right: 4px; }
+.token-label { font-weight: 500; color: var(--akiba-chat-text-faint); margin-right: 4px; }
 .token-value {
   background: #eef2f7; padding: 1px 6px; border-radius: 4px;
   font-family: monospace; font-size: 11px;
 }
 .token-value.total { background: #fce4ec; color: #c62828; }
-.token-value.context { background: #e8f5e9; color: #2e7d32; }
-.token-value.context-dim { background: #fff3e0; color: #e65100; }
+.token-value.context { background: color-mix(in srgb, var(--akiba-success) 18%, transparent); color: #2e7d32; }
+.token-value.context-dim { background: color-mix(in srgb, var(--akiba-warning) 18%, transparent); color: #e65100; }
 .token-model {
-  margin-left: auto; font-size: 10px; color: #aaa;
+  margin-left: auto; font-size: 10px; color: var(--akiba-chat-text-faint);
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .automated-banner {
-  background: #fff3cd;
+  background: color-mix(in srgb, var(--akiba-warning) 18%, transparent);
   color: #856404;
   padding: 8px 16px;
   font-size: 12px;
@@ -4611,7 +4611,7 @@ watch(
 }
 
 .error-banner {
-  background: #ffebee;
+  background: color-mix(in srgb, var(--akiba-danger) 16%, transparent);
   color: #d32f2f;
   padding: 10px 16px;
   font-size: 13px;
@@ -4631,7 +4631,7 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  background: #fff8e1;
+  background: color-mix(in srgb, var(--akiba-warning) 14%, transparent);
   color: #8d6e00;
   padding: 10px 16px;
   font-size: 13px;
@@ -4814,13 +4814,13 @@ watch(
   border-color: #c0392b;
 }
 .composer-area {
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--akiba-chat-surface-alt);
 }
 
 .llm-selector {
   padding: 8px 16px;
-  background: #fafafa;
-  border-bottom: 1px solid #eee;
+  background: var(--akiba-chat-hover);
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
 }
 .llm-selector-row {
   display: flex;
@@ -4831,15 +4831,15 @@ watch(
 .llm-select {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 5px;
   font-size: 13px;
   font-family: inherit;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
 }
 .llm-empty {
   font-size: 13px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 .llm-link {
   color: var(--vscode-button-background);
@@ -4852,7 +4852,7 @@ watch(
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  background: #fafafa;
+  background: var(--akiba-chat-hover);
 }
 
 .composer-input-row {
@@ -4862,7 +4862,7 @@ watch(
 
 .composer textarea {
   flex: 1;
-  border: 1px solid #ddd;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
   padding: 10px 12px;
   font-family: inherit;
@@ -4881,7 +4881,7 @@ watch(
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: #666;
+  color: var(--vscode-descriptionForeground);
   cursor: pointer;
 }
 
@@ -4891,7 +4891,7 @@ watch(
 
 .composer textarea {
   flex: 1;
-  border: 1px solid #ddd;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
   padding: 10px 12px;
   font-family: inherit;
@@ -4899,10 +4899,10 @@ watch(
   resize: vertical;
 }
 
-.composer textarea:disabled { background: #f0f0f0; }
+.composer textarea:disabled { background: var(--akiba-chat-surface-alt); }
 
 .muted {
-  color: #999;
+  color: var(--akiba-chat-text-faint);
   text-align: center;
   padding: 14px;
 }
@@ -4912,8 +4912,8 @@ watch(
 .ctx-menu {
   position: fixed;
   z-index: 200;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.12);
   padding: 4px 0;
@@ -4926,13 +4926,13 @@ watch(
   user-select: none;
   white-space: nowrap;
 }
-.ctx-menu-item:hover { background: #fff5f7; color: var(--vscode-button-background); }
+.ctx-menu-item:hover { background: color-mix(in srgb, var(--akiba-accent) 14%, transparent); color: var(--vscode-button-background); }
 
 /* ---- Session list hint --------------------------------------------------- */
 .session-hint {
   margin-bottom: 8px;
   padding: 6px 8px;
-  background: #f8f9fa;
+  background: var(--akiba-chat-hover);
   border-radius: 4px;
   font-size: 11px;
   line-height: 1.4;
@@ -4951,7 +4951,7 @@ watch(
   border: 1px solid var(--border, #d1d5db);
   border-radius: 5px;
   font-size: 12px;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   color: var(--text, #374151);
   box-sizing: border-box;
 }
@@ -4981,7 +4981,7 @@ watch(
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d1d5db;
+  background: var(--vscode-panel-border);
   flex-shrink: 0;
 }
 .running-dot-inline.active {
@@ -5001,8 +5001,8 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: 10px 18px;
-  border-bottom: 1px solid #eee;
-  background: #fafafa;
+  border-bottom: 1px solid var(--akiba-chat-surface-alt);
+  background: var(--akiba-chat-hover);
 }
 .chat-title {
   display: flex;
@@ -5045,7 +5045,7 @@ watch(
   font: inherit;
   font-weight: 600;
   color: inherit;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   border: 1px solid #4a7dff;
   border-radius: 6px;
   outline: none;
@@ -5075,7 +5075,7 @@ watch(
   padding: 3px 6px;
   font-size: 0.8rem;
   color: inherit;
-  background: #fff;
+  background: var(--vscode-editorWidget-background);
   border: 1px solid #d6d9de;
   border-radius: 6px;
 }
@@ -5091,7 +5091,7 @@ watch(
 }
 .chat-title-meta {
   font-size: 11px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 .chat-actions { display: flex; gap: 8px; }
 
@@ -5129,7 +5129,7 @@ watch(
 }
 .subagent-stop-ok    { background: #c8e6c9; color: #2e7d32; }
 .subagent-stop-warn  { background: #ffe0b2; color: #e65100; }
-.subagent-stop-other { background: #e0e0e0; color: #555; }
+.subagent-stop-other { background: var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
 
 .subagent-stats {
   display: flex;
@@ -5161,7 +5161,7 @@ watch(
 .subagent-label {
   font-size: 10px;
   font-weight: 600;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 4px;
@@ -5202,7 +5202,7 @@ watch(
 .subagent-child-id {
   font-family: 'Courier New', monospace;
   font-size: 10px;
-  color: #888;
+  color: var(--akiba-chat-text-faint);
 }
 
 </style>

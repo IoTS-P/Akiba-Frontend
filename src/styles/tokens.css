@@ -25,10 +25,11 @@
   --akiba-chat-bg: #1a1a2e;
   --akiba-chat-surface: #1e1e2e;
   --akiba-chat-surface-alt: #313244;
+  --akiba-chat-hover: #262638;
   --akiba-chat-border: #333346;
   --akiba-chat-text: #cdd6f4;
   --akiba-chat-text-muted: #a6adc8;
-  --akiba-chat-text-faint: #6b7280;
+  --akiba-chat-text-faint: #8a8f98;
 
   /* ---- brand and status ------------------------------------------------ */
   --akiba-accent: #e94560;

@@ -23,8 +23,8 @@ onMounted(async () => {
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
     Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
-  background: #f5f5f5;
-  color: #333;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
 }
 
 #app {
