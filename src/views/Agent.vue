@@ -1547,6 +1547,23 @@ async function loadProjectPrograms() {
 }
 
 /** Point the conversation at another program. */
+/**
+ * Put the session's stored program back in the picker when the list did not carry it.
+ *
+ * The list is a summary; which program a conversation was left on is a detail of that
+ * conversation, so it is read from the session itself rather than assumed missing.
+ */
+async function hydrateCurrentProgram(id: string) {
+  const entry = findSessionById(id)
+  if (!entry || entry.currentProgram != null) return
+  try {
+    const { data } = await agentApi.getSession(id)
+    if (data.currentProgram != null) entry.currentProgram = data.currentProgram
+  } catch {
+    // The picker stays empty; the conversation is still usable.
+  }
+}
+
 async function onProgramChange(event: Event) {
   const id = activeSessionId.value
   const value = (event.target as HTMLSelectElement).value
@@ -1587,6 +1604,7 @@ watch(
 
 async function selectSession(id: string) {
   activeSessionId.value = id
+  void hydrateCurrentProgram(id)
   errorMsg.value = ''
   messages.value = []
   selectedWakeIndex.value = -1
