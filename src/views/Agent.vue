@@ -396,6 +396,19 @@
             <span class="interruption-text">{{ n.text }}</span>
             <span class="interruption-line"></span>
           </div>
+          <!-- What the model said before calling a tool.  Without this the
+               text and the cards swap places: the answer written first ends up
+               below the tools that were called after it. -->
+          <div
+            v-for="(seg, i) in streamCommits"
+            :key="`commit-${i}`"
+            class="msg assistant streaming-live stream-commit"
+          >
+            <div class="msg-header">
+              <span class="role">Akiba</span>
+            </div>
+            <div class="content" v-html="seg.html"></div>
+          </div>
           <!-- Tool calls that are running right now.  The server pushes a
                tool_start event when a tool begins, so the card appears while
                the work is happening instead of only once it is stored. -->
@@ -443,7 +456,9 @@
             <div class="msg-header">
               <span class="role">Akiba</span>
               <span class="time streaming-live-time">
-                streaming<span v-if="streamingChunkCount > 0"> · {{ streamingChunkCount }} chunks</span>
+                <template v-if="!streamFinalized">
+                  streaming<span v-if="streamingChunkCount > 0"> · {{ streamingChunkCount }} chunks</span>
+                </template>
                 <span v-if="streamStalled" class="stream-stall-indicator">
                   <span class="stream-stall-spinner"></span> waiting for model…
                 </span>
@@ -2295,6 +2310,15 @@ interface LiveTool {
 const liveTools = ref<LiveTool[]>([])
 /** Cards whose stop button has been pressed and is waiting for the tool to end. */
 const stoppingTools = ref<Set<string>>(new Set())
+/** Text the model finished before calling a tool, in the order it said it. */
+const streamCommits = ref<Array<{ html: string }>>([])
+/**
+ * True once the model has stopped producing this answer.
+ *
+ * The bubble still shows the text while the stored row catches up, but it is no longer
+ * "streaming" and saying so made a finished answer look unfinished.
+ */
+const streamFinalized = ref(false)
 /** Bumped once a second so the live timers advance. */
 const clockTick = ref(Date.now())
 let clockTimer: ReturnType<typeof setInterval> | null = null
@@ -2342,6 +2366,23 @@ function describeToolArgs(raw: string): string {
   return parts.join('  ')
 }
 
+/**
+ * Freeze the text streamed so far into the turn's visible history.
+ *
+ * Called when a tool starts: everything said before the call stays above the card, and the
+ * next generation continues in a fresh bubble beneath it.
+ */
+function commitStreamingText() {
+  const html = streamingHtml.value || streamingText.value
+  if (!html) return
+  streamCommits.value = [...streamCommits.value, { html }]
+  streamingText.value = ''
+  streamingHtml.value = ''
+  targetText = ''
+  streamingChunkCount.value = 0
+  renderStreamingNow()
+}
+
 /** Ask the tool this session is running to stop; the turn keeps going. */
 async function stopTool(id: string) {
   const sessionId = activeSessionId.value
@@ -2366,6 +2407,9 @@ function applyToolEvent(kind: string, payload: string) {
   const id = info?.id
   if (!id) return
   if (kind === 'tool_start') {
+    // The text so far belongs to the message being answered; the call that follows
+    // must land below it, not above.
+    commitStreamingText()
     if (!liveTools.value.some(t => t.id === id)) {
       liveTools.value = [
         ...liveTools.value,
@@ -2602,9 +2646,13 @@ function startStreamPolling(sessionId: string) {
   streamThinkingActive.value = false
   streamingChunkCount.value = 0
   streamInterruptedError.value = null
+  streamFinalized.value = false
   streamStalled.value = false
   lastStreamChunkAt = Date.now()
   targetText = ''
+  liveTools.value = []
+  stoppingTools.value = new Set()
+  streamCommits.value = []
   streamPollSession = sessionId
   streamPollSince = 0
   streamPollGeneration = -1
@@ -2758,6 +2806,7 @@ function finishStreaming(error?: string | null) {
   // vanished, and the row appeared up to a poll later — the final
   // answer looked truncated and then jumped.)
   streamInterruptedError.value = null
+  streamFinalized.value = true
   const finalText = targetText
   const lastRowIdBefore = messages.value[messages.value.length - 1]?.messageId
   targetText = ''
@@ -2783,6 +2832,14 @@ function finishStreaming(error?: string | null) {
       streamingHtml.value = ''
       streamingThinkHtml.value = ''
       streamThinkingActive.value = false
+      streamFinalized.value = false
+      // The turn is over: any card still on screen never got its end event (a fast
+      // model can start the next generation before the poll sees it), and an ended
+      // tool must not leave a timer ticking under the answer.
+      liveTools.value = []
+      stoppingTools.value = new Set()
+      streamCommits.value = []
+      stopClock()
     }
   }, 300)
 }
