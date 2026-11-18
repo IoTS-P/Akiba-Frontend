@@ -37,6 +37,8 @@ let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let currentUri = ''
 /** True while the editor is being written to by us, not by the person typing. */
 let suppress = false
+/** Text asked for before the editor existed; applied as soon as it does. */
+let pendingText: string | null = null
 
 onMounted(() => {
   if (!host.value) return
@@ -52,6 +54,10 @@ onMounted(() => {
   // Ctrl/Cmd+S belongs to the document, not the browser.
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
   bind(props.uri, props.language, props.modelValue)
+  if (pendingText !== null) {
+    setText(pendingText)
+    pendingText = null
+  }
 
   editor.onDidChangeModelContent(() => {
     // setValue fires this too; that is a load, not an edit, and must not mark the document dirty.
@@ -70,9 +76,10 @@ function bind(uri: string, language: string, initial: string) {
   if (editor.getModel() !== model) editor.setModel(model)
   // A brand new document starts from the text its owner already has; an existing one keeps
   // whatever it holds, which may be newer than the copy on disk.
-  if (created && initial && model.getValue() !== initial) {
+  const wanted = initial || pendingText || ''
+  if (created && wanted && model.getValue() !== wanted) {
     suppress = true
-    model.setValue(initial)
+    model.setValue(wanted)
     suppress = false
   }
 }
@@ -80,7 +87,11 @@ function bind(uri: string, language: string, initial: string) {
 /** Write text into the current document without counting it as an edit. */
 function setText(text: string) {
   const model = editor?.getModel()
-  if (!model || model.getValue() === text) return
+  if (!model) {
+    pendingText = text
+    return
+  }
+  if (model.getValue() === text) return
   suppress = true
   model.setValue(text)
   suppress = false
