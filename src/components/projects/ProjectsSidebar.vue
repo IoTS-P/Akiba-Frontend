@@ -154,22 +154,45 @@ async function dropOnEmpty(ev: DragEvent) {
   await importInto(project, '', ev)
 }
 
+/**
+ * Importing a file is a background job: the POST returns a task id, not a file id.
+ *
+ * The id is therefore looked for in the file list until it appears; consuming the progress
+ * stream instead would tie this panel to an event format for one number.
+ */
+async function waitForBinaryId(name: string, timeoutMs = 120_000): Promise<number | null> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const { data } = await fileApi.list(0, 30)
+      const hit = (data.files ?? []).find(
+        f => f.name === name || (f.originalPath ?? '').endsWith(`/${name}`),
+      )
+      if (hit) return hit.id
+    } catch {
+      // A failed poll is not a failed import; keep trying until the timeout.
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  return null
+}
+
 async function importInto(project: string, folder: string, ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
+  error.value = ''
   try {
     for (const file of files) {
       const form = new FormData()
       form.append('files', file, file.name)
-      const imported = await fileApi.import(form)
-      const ids = imported.data?.fileIds ?? []
-      if (!ids.length) {
-        error.value = `The file store accepted ${file.name} but returned no id; nothing was imported.`
+      await fileApi.import(form)
+
+      const id = await waitForBinaryId(file.name)
+      if (id == null) {
+        error.value = `${file.name} is still being imported; check the Files page in a moment.`
         continue
       }
-      for (const id of ids) {
-        await projectApi.importBinary(project, { binaryId: String(id), folder })
-      }
+      await projectApi.importBinary(project, { binaryId: String(id), folder })
     }
     await reload(project)
   } catch (e: any) {
