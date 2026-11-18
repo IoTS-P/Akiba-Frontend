@@ -83,7 +83,16 @@ async function save() {
   const current = script.value
   if (!current) return
   try {
-    await scriptApi.update(current.id, { code: code.value })
+    // The update route replaces every field it is given; a missing name would be written as
+    // NULL over a NOT NULL column, which is what the server was rejecting with a 500.
+    await scriptApi.update(current.id, {
+      name: current.name,
+      description: current.description ?? '',
+      code: code.value,
+      language: current.language ?? 'kotlin',
+      saveResult: current.saveResult ?? true,
+      maxOutputSize: current.maxOutputSize ?? 10485760,
+    })
     dirty.value = false
   } catch {
     // Leave it marked dirty: a failed write must not look saved.
