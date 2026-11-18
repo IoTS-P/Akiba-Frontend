@@ -26,10 +26,15 @@ const route = useRoute()
 const script = ref<Script | null>(null)
 const code = ref('')
 const dirty = ref(false)
+/** A load is not an edit: without this the old text is saved into the newly chosen script. */
+const loading = ref(false)
 
 const activeId = computed(() => Number(route.query.id) || null)
 
 async function load(id: number) {
+  loading.value = true
+  script.value = null
+  code.value = ''
   try {
     const { data } = await scriptApi.get(id)
     script.value = data
@@ -37,12 +42,14 @@ async function load(id: number) {
     dirty.value = false
   } catch {
     script.value = null
+  } finally {
+    loading.value = false
   }
 }
 
 let timer: number | undefined
 watch(code, () => {
-  if (!script.value) return
+  if (loading.value || !script.value) return
   dirty.value = true
   window.clearTimeout(timer)
   timer = window.setTimeout(() => void save(), 800)

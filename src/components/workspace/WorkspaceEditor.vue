@@ -35,6 +35,8 @@ const emit = defineEmits<{ 'update:modelValue': [string]; save: [] }>()
 const host = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let currentUri = ''
+/** True while the editor is being written to by us, not by the person typing. */
+let suppress = false
 
 onMounted(() => {
   if (!host.value) return
@@ -52,6 +54,8 @@ onMounted(() => {
   bind(props.uri, props.language, props.modelValue)
 
   editor.onDidChangeModelContent(() => {
+    // setValue fires this too; that is a load, not an edit, and must not mark the document dirty.
+    if (suppress) return
     if (editor?.getModel()?.uri.toString() === currentUri) {
       emit('update:modelValue', editor.getValue())
     }
@@ -63,8 +67,14 @@ function bind(uri: string, language: string, initial: string) {
   if (!editor || !uri) return
   currentUri = uri
   const model = modelFor(uri, language, initial)
-  if (editor.getModel() !== model) editor.setModel(model)
-  if (model.getValue() !== initial) model.setValue(initial)
+  if (editor.getModel() !== model) {
+    editor.setModel(model)
+  }
+  if (model.getValue() !== initial) {
+    suppress = true
+    model.setValue(initial)
+    suppress = false
+  }
 }
 
 watch(() => props.uri, uri => bind(uri, props.language, props.modelValue))
@@ -73,7 +83,9 @@ watch(() => props.uri, uri => bind(uri, props.language, props.modelValue))
 watch(() => props.modelValue, value => {
   const model = editor?.getModel()
   if (model && model.uri.toString() === currentUri && model.getValue() !== value) {
+    suppress = true
     model.setValue(value)
+    suppress = false
   }
 })
 
