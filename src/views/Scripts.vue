@@ -42,7 +42,8 @@ const editorRef = ref<{ setText: (t: string) => void } | null>(null)
 const activeId = computed(() => Number(route.query.id) || null)
 
 async function load(id: number) {
-  // A save scheduled for the previous script must not fire into this one.
+  // A save scheduled for the previous script is flushed before the switch, not after it:
+  // the server is busy for several seconds per write, and that must not land in the new one.
   window.clearTimeout(timer)
   loading.value = true
   try {
@@ -75,7 +76,7 @@ watch(code, value => {
   const forId = script.value.id
   timer = window.setTimeout(() => {
     if (script.value?.id === forId) void save()
-  }, 800)
+  }, 2500)
 })
 
 async function save() {
