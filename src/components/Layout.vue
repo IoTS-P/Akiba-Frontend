@@ -146,9 +146,10 @@
       <div v-if="activeFile" class="file-body">
         <WorkspaceEditor
           v-if="!activeFile.binary"
-          :model-value="activeFile.content"
+          ref="fileEditorRef"
           :language="activeFile.language"
           :uri="activeFile.uri"
+          :model-value="activeFile.content"
           @update:model-value="onEdit(activeFile, $event)"
           @save="saveTab(activeFile)"
         />
@@ -307,6 +308,7 @@ const fileTabs = ref<FileTab[]>([])
 const scriptTabs = ref<ScriptTab[]>([])
 const scriptText = ref('')
 const editorRef = ref<{ setText: (t: string) => void } | null>(null)
+const fileEditorRef = ref<{ setText: (t: string) => void } | null>(null)
 const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.value) ?? null)
 const activeScript = computed(() => scriptTabs.value.find(t => t.key === activeKey.value) ?? null)
 
@@ -376,6 +378,13 @@ watch(() => route.fullPath, () => {
 
 watch(activeScript, tab => {
   if (tab) void loadScriptText(tab.id)
+})
+
+// Whichever tab is showing, its text is pushed after the editor exists.
+watch(activeFile, async tab => {
+  if (!tab || tab.binary) return
+  await nextTick()
+  fileEditorRef.value?.setText(tab.content)
 })
 const activeKey = ref<string>('view')
 const saveTimers = new Map<string, number>()
