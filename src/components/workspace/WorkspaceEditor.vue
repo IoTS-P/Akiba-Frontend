@@ -10,7 +10,6 @@ import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
-import { modelFor } from '@/editor/monacoModels'
 
 // Monaco loads its language services in workers; without this it silently degrades to plain text.
 self.MonacoEnvironment = {
@@ -23,70 +22,55 @@ self.MonacoEnvironment = {
   },
 }
 
+/**
+ * One editor, one document at a time, text swapped in place.
+ *
+ * There is deliberately no model registry. Sharing models between views caused two bugs that
+ * looked unrelated — a document showing another's text, and Monaco throwing `Canceled` while a
+ * model was disposed under a switching editor — and both vanish when the editor owns exactly one
+ * model for its whole life. The cost is the undo history across a tab switch, which is a fair
+ * trade for not losing text.
+ */
 const props = withDefaults(defineProps<{
-  /** Optional: the owner usually pushes text through setText after the document loads. */
   modelValue?: string
   language: string
-  /** Stable identity of the document; two tabs with the same uri share one model. */
+  /** Identity of the document; switching it replaces the text. */
   uri: string
   readOnly?: boolean
 }>(), { modelValue: '', readOnly: false })
+
 const emit = defineEmits<{ 'update:modelValue': [string]; save: [] }>()
 
 const host = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
-let currentUri = ''
-/** True while the editor is being written to by us, not by the person typing. */
 let suppress = false
-/** Text asked for before the editor existed; applied as soon as it does. */
 let pendingText: string | null = null
 
 onMounted(() => {
   if (!host.value) return
   editor = monaco.editor.create(host.value, {
-    value: '',
+    value: props.modelValue || '',
+    language: props.language,
     theme: 'vs-dark',
-    readOnly: props.readOnly ?? false,
+    readOnly: props.readOnly,
     automaticLayout: true,
     minimap: { enabled: false },
     fontSize: 13,
     scrollBeyondLastLine: false,
   })
-  // Ctrl/Cmd+S belongs to the document, not the browser.
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
-  bind(props.uri, props.language, props.modelValue)
+  editor.onDidChangeModelContent(() => {
+    if (suppress) return
+    emit('update:modelValue', editor?.getValue() ?? '')
+  })
   if (pendingText !== null) {
-    setText(pendingText)
+    writeText(pendingText)
     pendingText = null
   }
-
-  editor.onDidChangeModelContent(() => {
-    // setValue fires this too; that is a load, not an edit, and must not mark the document dirty.
-    if (suppress) return
-    if (editor?.getModel()?.uri.toString() === currentUri) {
-      emit('update:modelValue', editor.getValue())
-    }
-  })
 })
 
-/** Point the one editor at the requested document. */
-function bind(uri: string, language: string, initial: string) {
-  if (!editor || !uri) return
-  currentUri = uri
-  const { model, created } = modelFor(uri, language, initial)
-  if (editor.getModel() !== model) editor.setModel(model)
-  // A brand new document starts from the text its owner already has; an existing one keeps
-  // whatever it holds, which may be newer than the copy on disk.
-  const wanted = initial || pendingText || ''
-  if (created && wanted && model.getValue() !== wanted) {
-    suppress = true
-    model.setValue(wanted)
-    suppress = false
-  }
-}
-
-/** Write text into the current document without counting it as an edit. */
-function setText(text: string) {
+/** Put text on screen without reporting it as an edit. */
+function writeText(text: string) {
   const model = editor?.getModel()
   if (!model) {
     pendingText = text
@@ -98,18 +82,19 @@ function setText(text: string) {
   suppress = false
 }
 
+/** Called by the owner once a document's text has been fetched. */
+function setText(text: string) {
+  writeText(text)
+}
+
 defineExpose({ setText })
 
-watch(() => props.uri, uri => bind(uri, props.language, props.modelValue))
+watch(() => props.uri, () => writeText(props.modelValue))
 
-// Only push text the editor did not produce itself, or the cursor jumps on every keystroke.
+// External writes only apply when they differ; the editor is the source of truth while focused.
 watch(() => props.modelValue, value => {
-  const model = editor?.getModel()
-  if (model && model.uri.toString() === currentUri && model.getValue() !== value) {
-    suppress = true
-    model.setValue(value)
-    suppress = false
-  }
+  if (!editor || editor.getValue() === value) return
+  writeText(value)
 })
 
 watch(() => props.language, language => {

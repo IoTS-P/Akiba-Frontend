@@ -167,7 +167,6 @@ import ScriptsSidebar from '@/components/scripts/ScriptsSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
-import { textOf } from '@/editor/monacoModels'
 import { workspaceApi, type WorkspaceScope } from '@/services/workspace'
 
 interface ViewItem {
@@ -357,17 +356,17 @@ async function openScriptTab(id: number, name: string) {
     activeKey.value = key
     return
   }
-  // Text first, tab second: when the editor mounts it already has something to show.
-  await loadScriptText(id)
   const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}` }
   scriptTabs.value.push(tab)
   activeKey.value = key
+  // The tab appears at once; the text follows and is applied when it arrives.
+  await loadScriptText(id)
 }
 
 async function loadScriptText(id: number) {
   try {
     const { data } = await scriptApi.get(id)
-    scriptText.value = textOf(`akiba://script/${id}`) ?? data.code ?? ''
+    scriptText.value = data.code ?? ''
     await nextTick()
     await pushActiveText()
   } catch {

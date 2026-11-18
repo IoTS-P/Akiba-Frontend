@@ -28,7 +28,6 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
-import { textOf } from '@/editor/monacoModels'
 import type { Script } from '@/types'
 
 const route = useRoute()
@@ -51,7 +50,7 @@ async function load(id: number) {
     script.value = data
     // A model that is already open may hold edits newer than the server's copy.
     // A document already open may hold edits newer than the server's copy.
-    const text = textOf(`akiba://script/${id}`) ?? data.code ?? ''
+    const text = data.code ?? ''
     code.value = text
     await nextTick()
     editorRef.value?.setText(text)
