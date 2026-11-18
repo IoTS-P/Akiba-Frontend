@@ -641,6 +641,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { agentApi, llmConfigApi, projectApi } from '@/services/api'
 import type { AgentSession, AgentMessage, SubAgentSummary } from '@/types'
 import type { StoredKeyEntry } from '@/services/api'
@@ -656,6 +657,7 @@ import { formatTime, formatBytes, formatDuration, shortId } from '@/utils/agentF
 
 const sessions = ref<AgentSession[]>([])
 const messages = ref<AgentMessage[]>([])
+const route = useRoute()
 const activeSessionId = ref<string | null>(null)
 
 /**
@@ -2017,6 +2019,19 @@ async function onProgramChange(event: Event) {
     programBusy.value = false
   }
 }
+
+/**
+ * The sidebar (and any deep link) selects a conversation through the route, so the view
+ * follows it instead of owning the choice alone.
+ */
+watch(
+  () => route.query.sessionId,
+  (id) => {
+    if (typeof id === 'string' && id && id !== activeSessionId.value) {
+      void selectSession(id)
+    }
+  },
+)
 
 async function selectSession(id: string) {
   activeSessionId.value = id

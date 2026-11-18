@@ -31,10 +31,16 @@
       <div class="sidebar-header">
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
-      <div class="sidebar-search">
+      <!-- Agent lists conversations; the other activities still list their views. -->
+      <AgentSidebar
+        v-if="isAgentActivity"
+        :active-id="activeSessionId"
+        @create="go('/agent')"
+      />
+      <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
-      <nav class="nav">
+      <nav v-if="!isAgentActivity" class="nav">
         <button
           v-for="item in filteredViews"
           :key="item.path"
@@ -84,6 +90,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import SystemStatus from '@/components/SystemStatus.vue'
+import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
 
 interface ViewItem {
   path: string
@@ -130,6 +137,12 @@ function isActive(path: string): boolean {
 function go(path: string) {
   router.push(path)
 }
+
+/** The agent activity owns its own sidebar: a list of conversations. */
+const isAgentActivity = computed(() => route.path.startsWith('/agent'))
+const activeSessionId = computed(() =>
+  typeof route.query.sessionId === 'string' ? route.query.sessionId : null
+)
 
 const currentRoute = computed(() => allViews.value.find(v => isActive(v.path))?.title ?? 'Akiba')
 const currentViewIcon = computed(() => allViews.value.find(v => isActive(v.path))?.icon ?? '◆')
