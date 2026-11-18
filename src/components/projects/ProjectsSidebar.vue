@@ -24,7 +24,7 @@
           <span class="chevron">{{ open.has(p.name) ? '▾' : '▸' }}</span>
           <span class="name">{{ p.name }}</span>
           <!-- The project is locked while files are imported; say so instead of showing an error. -->
-          <span v-if="importing[p.name]" class="importing">
+          <span v-if="importing.has(p.name)" class="importing">
             <span class="spinner"></span>importing files
           </span>
           <span v-else class="count">{{ p.programCount ?? '' }}</span>
@@ -94,7 +94,7 @@ const selectedProject = ref<string | null>(null)
 const error = ref('')
 const dragOver = ref(false)
 /** Projects with an import running; the project is locked by Ghidra until it finishes. */
-const importing = reactive<Record<string, boolean>>({})
+const importing = ref<Set<string>>(new Set())
 
 function rootsOf(project: string): Entry[] {
   const all = entriesByProject[project] ?? []
@@ -142,7 +142,7 @@ async function reload(name: string) {
   } catch (e: any) {
     const message = e?.response?.data?.error || ''
     // While an import holds the project, reading its tree fails. That is expected, not news.
-    if (!(importing[name] && /in use/i.test(message))) {
+    if (!(importing.value.has(name) && /in use/i.test(message))) {
       error.value = message || `Could not read project ${name}.`
     }
   } finally {
@@ -191,7 +191,7 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
   const files = [...(ev.dataTransfer?.files ?? [])]
   if (!files.length) return
   error.value = ''
-  importing[project] = true
+  importing.value = new Set(importing.value).add(project)
   try {
     for (const file of files) {
       const form = new FormData()
@@ -208,7 +208,9 @@ async function importInto(project: string, folder: string, ev: DragEvent) {
   } catch (e: any) {
     error.value = e?.response?.data?.error || 'Import failed.'
   } finally {
-    importing[project] = false
+    const done = new Set(importing.value)
+    done.delete(project)
+    importing.value = done
     await reload(project)
   }
 }
