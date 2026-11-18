@@ -27,7 +27,7 @@
     </nav>
 
     <!-- Sidebar: the list of things in the active family. -->
-    <aside class="sidebar">
+    <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar-header">
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
@@ -39,10 +39,18 @@
           @open="openConversation"
           @workspace="openWorkspace"
         />
+        <div
+          v-if="workspaceSessionId"
+          class="resizer-h"
+          role="separator"
+          aria-orientation="horizontal"
+          @pointerdown="startSplitDrag"
+        ></div>
         <WorkspacePanel
           v-if="workspaceSessionId"
           :session-id="workspaceSessionId"
           class="split-bottom"
+          :style="{ flexBasis: splitPercent + '%' }"
           @close="workspaceSessionId = null"
         />
       </div>
@@ -75,6 +83,9 @@
         </div>
       </div>
     </aside>
+
+    <!-- Dragging the edge is how a sidebar earns its width. -->
+    <div class="resizer-v" role="separator" aria-orientation="vertical" @pointerdown="startWidthDrag"></div>
 
     <!-- Editor area: the tab bar, the page, nothing below it. -->
     <main class="editor">
@@ -153,6 +164,46 @@ const isAgentActivity = computed(() => route.path.startsWith('/agent'))
 const activeSessionId = computed(() =>
   typeof route.query.sessionId === 'string' ? route.query.sessionId : null
 )
+
+const SIDEBAR_KEY = 'akiba.sidebar.width'
+const SPLIT_KEY = 'akiba.sidebar.split'
+
+const sidebarWidth = ref(Number(localStorage.getItem(SIDEBAR_KEY)) || 260)
+const splitPercent = ref(Number(localStorage.getItem(SPLIT_KEY)) || 45)
+
+/** Drag the sidebar's right edge. Clamped so neither side can disappear. */
+function startWidthDrag(e: PointerEvent) {
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+  const move = (ev: PointerEvent) => {
+    sidebarWidth.value = Math.min(520, Math.max(180, startWidth + (ev.clientX - startX)))
+  }
+  const up = () => {
+    localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth.value))
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+
+/** Drag the boundary between the session tree and the workspace. */
+function startSplitDrag(e: PointerEvent) {
+  const area = (e.currentTarget as HTMLElement).parentElement
+  if (!area) return
+  const rect = area.getBoundingClientRect()
+  const move = (ev: PointerEvent) => {
+    const fromBottom = ((rect.bottom - ev.clientY) / rect.height) * 100
+    splitPercent.value = Math.min(85, Math.max(15, Math.round(fromBottom)))
+  }
+  const up = () => {
+    localStorage.setItem(SPLIT_KEY, String(splitPercent.value))
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
 
 /** The conversation whose workspace is open below the session tree, if any. */
 const workspaceSessionId = ref<string | null>(null)
@@ -240,7 +291,7 @@ async function handleLogout() {
 /* ---- sidebar ----------------------------------------------------------- */
 .sidebar {
   width: 260px;
-  min-width: 200px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--akiba-chat-surface);
@@ -268,6 +319,32 @@ async function handleLogout() {
   box-sizing: border-box;
   padding: 4px 8px;
   font-size: 12px;
+}
+
+.resizer-v {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex: 0 0 auto;
+  transition: background 0.15s;
+}
+
+.resizer-v:hover,
+.resizer-v:active {
+  background: var(--vscode-focusBorder);
+}
+
+.resizer-h {
+  height: 4px;
+  cursor: row-resize;
+  background: transparent;
+  flex: 0 0 auto;
+  transition: background 0.15s;
+}
+
+.resizer-h:hover,
+.resizer-h:active {
+  background: var(--vscode-focusBorder);
 }
 
 .sidebar-split {
