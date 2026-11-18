@@ -320,10 +320,11 @@ async function openScriptTab(id: number, name: string) {
     activeKey.value = key
     return
   }
+  // Text first, tab second: when the editor mounts it already has something to show.
+  await loadScriptText(id)
   const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}` }
   scriptTabs.value.push(tab)
   activeKey.value = key
-  await loadScriptText(id)
 }
 
 async function loadScriptText(id: number) {
@@ -376,8 +377,11 @@ watch(() => route.fullPath, () => {
   activeKey.value = 'view'
 })
 
-watch(activeScript, tab => {
-  if (tab) void loadScriptText(tab.id)
+watch(activeScript, async tab => {
+  if (!tab) return
+  await loadScriptText(tab.id)
+  await nextTick()
+  editorRef.value?.setText(scriptText.value)
 })
 
 // Whichever tab is showing, its text is pushed after the editor exists.
