@@ -152,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
@@ -232,6 +232,17 @@ function openAnyFile(path: string) {
 const activeSessionId = computed(() =>
   typeof route.query.sessionId === 'string' ? route.query.sessionId : null
 )
+
+// A page container duplicated by a careless edit renders every view twice, which looks like a
+// styling bug and is invisible to the compiler. Say so while developing.
+if (import.meta.env.DEV) {
+  onMounted(() => {
+    const containers = document.querySelectorAll('.content').length
+    if (containers !== 1) {
+      console.warn(`[layout] expected one page container, found ${containers}`)
+    }
+  })
+}
 
 const SIDEBAR_KEY = 'akiba.sidebar.width'
 const SPLIT_KEY = 'akiba.sidebar.split'
