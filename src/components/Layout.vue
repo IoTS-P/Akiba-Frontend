@@ -295,6 +295,8 @@ interface ScriptTab {
   id: number
   title: string
   uri: string
+  /** The text belongs to the tab, not to whichever tab happens to be on screen. */
+  text: string
   dirty: boolean
 }
 
@@ -313,7 +315,7 @@ interface ActiveDoc {
 
 const activeDoc = computed<ActiveDoc | null>(() => {
   const script = activeScript.value
-  if (script) return { uri: script.uri, language: 'kotlin', text: scriptText.value, kind: 'script' }
+  if (script) return { uri: script.uri, language: 'kotlin', text: script.text, kind: 'script' }
   const file = activeFile.value
   if (!file) return null
   return {
@@ -328,9 +330,10 @@ function onDocEdit(text: string) {
   const doc = activeDoc.value
   if (!doc) return
   if (doc.kind === 'script') {
-    scriptText.value = text
     const tab = activeScript.value
-    if (tab) tab.dirty = true
+    if (!tab) return
+    tab.text = text
+    tab.dirty = true
     return
   }
   const file = activeFile.value
@@ -346,7 +349,7 @@ async function pushActiveText() {
 }
 
 function saveActiveDoc() {
-  if (activeDoc.value?.kind === 'script') void saveScript()
+  if (activeDoc.value?.kind === 'script') void saveScript(activeScript.value)
   else if (activeFile.value) void saveTab(activeFile.value)
 }
 const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.value) ?? null)
@@ -360,7 +363,7 @@ async function openScriptTab(id: number, name: string) {
     activeKey.value = key
     return
   }
-  const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}`, dirty: false }
+  const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}`, text: '', dirty: false }
   scriptTabs.value.push(tab)
   // The watcher below fetches the text; doing it here as well was the reason a double click
   // produced two requests and, with a fast second click, two answers landing out of order.
@@ -378,7 +381,8 @@ async function loadScriptText(id: number) {
     // The answer is only applied if that tab is still the one on screen; otherwise a slow
     // response would drop one script's text into another's tab.
     if (activeKey.value !== key) return
-    scriptText.value = data.code ?? ''
+    const tab = scriptTabs.value.find(t => t.key === key)
+    if (tab) tab.text = data.code ?? ''
     await nextTick()
     await pushActiveText()
   } catch {
@@ -388,15 +392,14 @@ async function loadScriptText(id: number) {
   }
 }
 
-async function saveScript() {
-  const tab = activeScript.value
+async function saveScript(tab: ScriptTab | null = activeScript.value) {
   if (!tab) return
   try {
     const { data } = await scriptApi.get(tab.id)
     await scriptApi.update(tab.id, {
       name: data.name,
       description: data.description ?? '',
-      code: scriptText.value,
+      code: tab.text,
       language: data.language ?? 'kotlin',
       saveResult: data.saveResult ?? true,
       maxOutputSize: data.maxOutputSize ?? 10485760,
@@ -408,17 +411,15 @@ async function saveScript() {
 }
 
 let scriptTimer: number | undefined
-watch(scriptText, () => {
-  if (!activeScript.value) return
+watch(() => activeScript.value?.text, () => {
+  const tab = activeScript.value
+  if (!tab) return
   window.clearTimeout(scriptTimer)
-  const forKey = activeScript.value.key
-  scriptTimer = window.setTimeout(() => {
-    if (activeKey.value === forKey) void saveScript()
-  }, 2500)
+  scriptTimer = window.setTimeout(() => void saveScript(tab), 2500)
 })
 
 function closeScriptTab(tab: ScriptTab) {
-  void saveScript()
+  void saveScript(tab)
   scriptTabs.value = scriptTabs.value.filter(t => t.key !== tab.key)
   if (activeKey.value === tab.key) activeKey.value = 'view'
 }
@@ -443,9 +444,10 @@ const activeKey = ref<string>('view')
 watch(activeKey, async (_next, previous) => {
   const file = fileTabs.value.find(t => t.key === previous)
   if (file?.dirty) await saveTab(file)
-  if (scriptTabs.value.some(t => t.key === previous)) {
+  const script = scriptTabs.value.find(t => t.key === previous)
+  if (script) {
     window.clearTimeout(scriptTimer)
-    await saveScript()
+    await saveScript(script)     // the tab that is being left, with its own text
   }
 })
 
