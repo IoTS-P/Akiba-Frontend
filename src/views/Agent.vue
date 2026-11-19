@@ -253,8 +253,17 @@
                         v-for="(row, i) in writeDiff(m)!.rows"
                         :key="i"
                         class="diff-row"
-                        :class="row.kind === '+' ? 'diff-row-add' : 'diff-row-del'"
-                      >{{ row.kind }} {{ row.text }}</div>
+                        :class="{
+                          'diff-row-add': row.kind === '+',
+                          'diff-row-del': row.kind === '-',
+                          'diff-row-ctx': row.kind === ' ',
+                        }"
+                      >
+                        <span class="diff-no">{{ row.oldNo ?? '' }}</span>
+                        <span class="diff-no">{{ row.newNo ?? '' }}</span>
+                        <span class="diff-sign">{{ row.kind }}</span>
+                        <span class="diff-text">{{ row.text }}</span>
+                      </div>
                       <div v-if="writeDiff(m)!.truncated" class="diff-row diff-row-more">
                         … {{ writeDiff(m)!.hidden }} more line(s)
                       </div>
@@ -2935,8 +2944,10 @@ function toolSummary(m: AgentMessage): string {
 }
 
 interface DiffRow {
-  kind: '+' | '-'
+  kind: '+' | '-' | ' '
   text: string
+  oldNo: number | null
+  newNo: number | null
 }
 
 interface WriteDiff {
@@ -2948,15 +2959,101 @@ interface WriteDiff {
   hidden: number
 }
 
-const DIFF_ROW_LIMIT = 300
+const DIFF_ROW_LIMIT = 400
+const DIFF_CONTEXT = 3
+
+const splitLines = (text: string): string[] => {
+  if (!text) return []
+  const lines = text.split('\n')
+  if (lines.length && lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
 
 /**
- * `write_workspace_file` is the one tool whose result is a document change.
- * It is shown as a diff rather than as JSON: the arguments *are* the edit, and
- * `oldString`/`newString` give the removed and added lines exactly.
- *
- * A full overwrite carries no previous text, so only its added lines are known
- * — saying so is better than inventing deletions that never happened.
+ * Line diff by longest common subsequence, with the common head and tail
+ * trimmed first. Trimming is what keeps a one-line edit inside a 4000-line file
+ * cheap; the LCS then only runs over the part that actually differs.
+ */
+function diffLines(oldLines: string[], newLines: string[]): DiffRow[] {
+  let head = 0
+  while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head]) head++
+  let tail = 0
+  while (
+    tail < oldLines.length - head &&
+    tail < newLines.length - head &&
+    oldLines[oldLines.length - 1 - tail] === newLines[newLines.length - 1 - tail]
+  ) tail++
+
+  const rows: DiffRow[] = []
+  for (let i = 0; i < head; i++) {
+    rows.push({ kind: ' ', text: oldLines[i], oldNo: i + 1, newNo: i + 1 })
+  }
+
+  const a = oldLines.slice(head, oldLines.length - tail)
+  const b = newLines.slice(head, newLines.length - tail)
+  const n = a.length
+  const m = b.length
+
+  if (n > 0 && m > 0 && n * m <= 4_000_000) {
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+      }
+    }
+    let i = 0
+    let j = 0
+    while (i < n && j < m) {
+      if (a[i] === b[j]) {
+        rows.push({ kind: ' ', text: a[i], oldNo: head + i + 1, newNo: head + j + 1 })
+        i++
+        j++
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        rows.push({ kind: '-', text: a[i], oldNo: head + i + 1, newNo: null })
+        i++
+      } else {
+        rows.push({ kind: '+', text: b[j], oldNo: null, newNo: head + j + 1 })
+        j++
+      }
+    }
+    while (i < n) {
+      rows.push({ kind: '-', text: a[i], oldNo: head + i + 1, newNo: null })
+      i++
+    }
+    while (j < m) {
+      rows.push({ kind: '+', text: b[j], oldNo: null, newNo: head + j + 1 })
+      j++
+    }
+  } else {
+    // Too large to compare: show the replaced block as it stands rather than lie.
+    a.forEach((text, i) => rows.push({ kind: '-', text, oldNo: head + i + 1, newNo: null }))
+    b.forEach((text, j) => rows.push({ kind: '+', text, oldNo: null, newNo: head + j + 1 }))
+  }
+
+  for (let k = 0; k < tail; k++) {
+    const oldIdx = oldLines.length - tail + k
+    const newIdx = newLines.length - tail + k
+    rows.push({ kind: ' ', text: oldLines[oldIdx], oldNo: oldIdx + 1, newNo: newIdx + 1 })
+  }
+  return rows
+}
+
+/** Keep a few unchanged lines around each change so the edit has a place. */
+function withContext(rows: DiffRow[], radius: number): DiffRow[] {
+  const keep = new Set<number>()
+  rows.forEach((row, i) => {
+    if (row.kind === ' ') return
+    for (let k = Math.max(0, i - radius); k <= Math.min(rows.length - 1, i + radius); k++) keep.add(k)
+  })
+  if (keep.size === 0) return rows.slice(0, Math.min(radius * 2, rows.length))
+  return rows.filter((_, i) => keep.has(i))
+}
+
+/**
+ * `write_workspace_file` is the one tool whose result is a document change, so
+ * it is shown as a diff rather than as JSON. `oldString`/`newString` give an
+ * exact edit; an overwrite or an append carries only the new text, so those say
+ * what they added and nothing about removal.
  */
 function writeDiff(m: AgentMessage): WriteDiff | null {
   if (m.role !== 'tool' || m.toolName !== 'write_workspace_file') return null
@@ -2967,41 +3064,31 @@ function writeDiff(m: AgentMessage): WriteDiff | null {
   const newText = typeof args.newString === 'string' ? args.newString : ''
   const content = typeof args.content === 'string' ? args.content : ''
 
-  const toLines = (text: string): string[] => {
-    if (!text) return []
-    const lines = text.split('\n')
-    if (lines.length && lines[lines.length - 1] === '') lines.pop()
-    return lines
-  }
-
-  let removedLines: string[] = []
-  let addedLines: string[] = []
+  let all: DiffRow[] = []
   let label = ''
 
   if (oldText || newText) {
-    removedLines = toLines(oldText)
-    addedLines = toLines(newText)
+    all = diffLines(splitLines(oldText), splitLines(newText))
     label = args.replaceAll ? 'Replace all occurrences' : 'Replace'
   } else if (content) {
-    addedLines = toLines(content)
+    all = splitLines(content).map((text, i) => ({ kind: '+' as const, text, oldNo: null, newNo: i + 1 }))
     label = args.append ? 'Append to file' : 'Write file'
   } else {
     return null
   }
 
-  const combined: DiffRow[] = [
-    ...removedLines.map(text => ({ kind: '-' as const, text })),
-    ...addedLines.map(text => ({ kind: '+' as const, text })),
-  ]
-  const rows = combined.slice(0, DIFF_ROW_LIMIT)
+  const added = all.filter(r => r.kind === '+').length
+  const removed = all.filter(r => r.kind === '-').length
+  const withCtx = withContext(all, DIFF_CONTEXT)
+  const rows = withCtx.slice(0, DIFF_ROW_LIMIT)
 
   return {
     label,
-    added: addedLines.length,
-    removed: removedLines.length,
+    added,
+    removed,
     rows,
-    truncated: combined.length > rows.length,
-    hidden: combined.length - rows.length,
+    truncated: withCtx.length > rows.length,
+    hidden: withCtx.length - rows.length,
   }
 }
 
