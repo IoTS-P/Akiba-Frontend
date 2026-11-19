@@ -7,7 +7,7 @@
       <button class="close-btn" title="Close workspace" @click="$emit('close')">×</button>
     </div>
 
-    <div class="panel-body" :class="{ dragging }">
+    <div class="panel-body" :class="{ dragging }" @contextmenu.self.prevent="blankMenu($event)">
       <div v-if="error" class="hint error">{{ error }}</div>
       <div v-else-if="!tree.length" class="hint">Empty workspace. Drop files here to upload.</div>
 
@@ -21,11 +21,21 @@
         @error="error = $event"
       />
     </div>
+
+    <div
+      v-if="ctx.show"
+      class="ctx"
+      :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
+      @click.self="ctx.show = false"
+    >
+      <div class="ctx-item" @click="newFile">New file…</div>
+      <div class="ctx-item" @click="newFolder">New folder…</div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import TreeNode from '@/components/workspace/TreeNode.vue'
 import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
@@ -35,6 +45,42 @@ defineEmits<{ close: []; openFile: [path: string] }>()
 const tree = ref<WorkspaceEntry[]>([])
 const error = ref('')
 const dragging = ref(false)
+const ctx = reactive({ show: false, x: 0, y: 0 })
+
+function blankMenu(ev: MouseEvent) {
+  ctx.show = true
+  ctx.x = ev.clientX
+  ctx.y = ev.clientY
+}
+
+function closeMenu() {
+  ctx.show = false
+}
+
+async function newFile() {
+  ctx.show = false
+  const name = window.prompt('New file name')
+  if (!name) return
+  try {
+    await workspaceApi.writeFile(props.scope, name, '')
+    await load('')
+  } catch {
+    error.value = 'Could not create the file.'
+  }
+}
+
+/** A folder exists once something is in it; the marker keeps it addressable. */
+async function newFolder() {
+  ctx.show = false
+  const name = window.prompt('New folder name')
+  if (!name) return
+  try {
+    await workspaceApi.writeFile(props.scope, `${name}/.keep`, '')
+    await load('')
+  } catch {
+    error.value = 'Could not create the folder.'
+  }
+}
 
 async function load(path: string) {
   error.value = ''
@@ -72,7 +118,11 @@ async function onDrop(ev: DragEvent) {
 }
 
 watch(() => props.scope, () => void load(''), { deep: true })
-onMounted(() => void load(''))
+onMounted(() => {
+  void load('')
+  window.addEventListener('click', closeMenu)
+})
+onUnmounted(() => window.removeEventListener('click', closeMenu))
 </script>
 
 <style scoped>
@@ -126,6 +176,29 @@ onMounted(() => void load(''))
 .panel-body.dragging {
   outline: 1px dashed var(--vscode-focusBorder);
   outline-offset: -4px;
+}
+
+.ctx {
+  position: fixed;
+  z-index: 60;
+  padding: 4px 0;
+  min-width: 170px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--akiba-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+}
+
+.ctx-item {
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.ctx-item:hover {
+  background: var(--vscode-focusBorder);
+  color: #fff;
 }
 
 .hint {
