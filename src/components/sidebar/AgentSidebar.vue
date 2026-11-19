@@ -189,12 +189,22 @@ function closeMenu() {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null
+/** Renamed elsewhere: take the new title now, not on the next poll. */
+function onSessionRenamed(ev: Event) {
+  const detail = (ev as CustomEvent<{ id: string; name: string }>).detail
+  if (!detail?.id) return
+  const row = sessions.value.find(r => r.sessionId === detail.id)
+  if (row) row.sessionName = detail.name
+}
+
 onMounted(() => {
   void load()
   timer = setInterval(() => void load(), 15000)
+  window.addEventListener('akiba:session-renamed', onSessionRenamed)
   window.addEventListener('click', closeMenu)
 })
 onUnmounted(() => {
+  window.removeEventListener('akiba:session-renamed', onSessionRenamed)
   if (timer) clearInterval(timer)
   window.removeEventListener('click', closeMenu)
 })

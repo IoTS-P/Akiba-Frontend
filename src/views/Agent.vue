@@ -1541,6 +1541,9 @@ async function saveSessionName() {
     await agentApi.updateSession(id, { sessionName: name })
     const entry = findSessionById(id)
     if (entry) entry.sessionName = name
+    // The sidebar keeps its own copy and reloads every 15 s; without this the
+    // new title only appears on that tick.
+    window.dispatchEvent(new CustomEvent('akiba:session-renamed', { detail: { id, name } }))
   } catch (e: any) {
     errorMsg.value = e?.response?.data?.error || e?.message || 'Rename failed.'
   }
@@ -2125,6 +2128,63 @@ function isLLMRetryStatusMessage(m: AgentMessage): boolean {
 // markdown rendering, tool calls, etc.) replaces the plain-text
 // streaming bubble.
 const streamingText = ref('')
+
+/**
+ * A turn that produces nothing for this long is not running, whatever the row
+ * says. Without this the spinner outlived every worker that died mid-turn: the
+ * status column kept "running" because nothing was left to clear it.
+ */
+const TURN_STALL_MS = 10 * 60 * 1000
+const lastTurnActivityAt = ref(Date.now())
+const stallTick = ref(Date.now())
+let stallTicker: number | null = null
+let stalledHandledFor: string | null = null
+
+const turnStalled = computed(() =>
+  turnRunning.value && stallTick.value - lastTurnActivityAt.value > TURN_STALL_MS
+)
+
+function watchForStall(on: boolean) {
+  if (on && stallTicker === null) {
+    stallTicker = window.setInterval(() => { stallTick.value = Date.now() }, 10_000)
+  } else if (!on && stallTicker !== null) {
+    window.clearInterval(stallTicker)
+    stallTicker = null
+  }
+}
+
+// Any message or streamed character counts as life.
+watch([() => messages.value.length, () => streamingText.value], () => {
+  lastTurnActivityAt.value = Date.now()
+  stallTick.value = Date.now()
+})
+
+watch(turnRunning, (on) => {
+  lastTurnActivityAt.value = Date.now()
+  if (!on) stalledHandledFor = null
+  watchForStall(on)
+}, { immediate: true })
+
+watch(turnStalled, (stalled) => {
+  if (!stalled) return
+  void abandonStalledTurn()
+})
+
+/** Close the turn the server left open, then say so once. */
+async function abandonStalledTurn() {
+  const id = activeSessionId.value
+  if (!id || stalledHandledFor === id) return
+  stalledHandledFor = id
+  try {
+    await agentApi.cancelChat(id)
+  } catch {
+    // Already gone: the point was to stop waiting, not to hear an error.
+  }
+  if (sendingSessionId.value === id) sendingSessionId.value = null
+  markInterruption('The agent stopped responding for ten minutes; the turn was closed.')
+  await loadSessions()
+  void refreshMessages()
+}
 const streamingChunkCount = ref(0)
 const streamingActive = ref(false)
 // Rendered-markdown view of [streamingText], refreshed on a
