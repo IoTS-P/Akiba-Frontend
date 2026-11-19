@@ -251,10 +251,27 @@
                 </div>
               </details>
             </div>
-            <div v-else class="content"
-                 v-html="m.messageId === STREAMING_MESSAGE_ID
-                   ? streamingContentHtml
-                   : renderMarkdown(displayContent(m))"></div>
+            <div v-else class="msg-body">
+              <div class="content"
+                   v-html="m.messageId === STREAMING_MESSAGE_ID
+                     ? streamingContentHtml
+                     : renderMarkdown(displayContent(m))"></div>
+              <button
+                v-if="m.messageId !== STREAMING_MESSAGE_ID && (displayContent(m) || '').trim()"
+                class="msg-copy"
+                :class="{ copied: copiedId === m.messageId }"
+                :title="copiedId === m.messageId ? 'Copied' : 'Copy markdown'"
+                @click="copyMarkdown(m)"
+              >
+                <svg v-if="copiedId !== m.messageId" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <path d="M6 15H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </div>
             </template>
           </div>
             <div v-if="noticeAfter(m.messageId)" class="interruption-note">
@@ -2719,6 +2736,31 @@ const wakeSegments = computed(() => {
  * with the wake-event separator for context.
  */
 /** Stands in for the assistant row the server has not written yet. */
+const copiedId = ref<number | null>(null)
+let copiedTimer: number | undefined
+
+/** Copies what the model wrote, not what is on screen: the rendered HTML has
+ *  lost the markdown the user wants to paste elsewhere. */
+async function copyMarkdown(m: any) {
+  const text = displayContent(m) || ''
+  if (!text.trim()) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const host = document.createElement('textarea')
+    host.value = text
+    host.style.position = 'fixed'
+    host.style.opacity = '0'
+    document.body.appendChild(host)
+    host.select()
+    document.execCommand('copy')
+    host.remove()
+  }
+  copiedId.value = m.messageId
+  window.clearTimeout(copiedTimer)
+  copiedTimer = window.setTimeout(() => { copiedId.value = null }, 1600)
+}
+
 const STREAMING_MESSAGE_ID = -1
 
 /**

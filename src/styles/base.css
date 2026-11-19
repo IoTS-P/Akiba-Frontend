@@ -83,3 +83,72 @@ pre {
   font-family: var(--akiba-font-mono);
   font-size: var(--akiba-font-code);
 }
+
+/* Markdown tables: borders only where they separate cells, so a table reads
+   as a table without a box around it. */
+.md-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md-th,
+.md-td {
+  border: 1px solid var(--vscode-panel-border);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-th {
+  background: var(--vscode-sideBar-background, rgba(255, 255, 255, 0.04));
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+}
+.md-td {
+  color: var(--vscode-editor-foreground);
+}
+.md-tr:nth-child(even) .md-td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Copy button: present but quiet until the message is hovered. */
+.msg-body {
+  position: relative;
+}
+.msg-copy {
+  position: absolute;
+  right: 0;
+  bottom: -22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--akiba-chat-text-faint, var(--vscode-editor-foreground));
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+.msg-body:hover .msg-copy,
+.msg-copy.copied {
+  opacity: 1;
+}
+.msg-copy:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-editor-foreground);
+}
+.msg-copy svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

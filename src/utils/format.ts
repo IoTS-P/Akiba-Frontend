@@ -17,6 +17,32 @@
  * dependency.
  */
 
+/** Rows and cells of a pipe table. The separator line is recognised by its
+ *  dashes, which is what distinguishes a table from a paragraph of pipes. */
+function renderTable(block: string): string {
+  const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
+  const cells = (line: string): string[] =>
+    line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+  const isSeparator = (line: string): boolean =>
+    /^\|?[\s:-]*-[\s:|-]*\|?$/.test(line)
+
+  const rows = lines.filter((l) => !isSeparator(l))
+  if (rows.length === 0) return block
+
+  const head = cells(rows[0])
+  const body = rows.slice(1)
+  const th = head.map((c) => `<th class="md-th">${c}</th>`).join('')
+  const trs = body
+    .map((r) => {
+      const tds = cells(r)
+        .map((c) => `<td class="md-td">${c}</td>`)
+        .join('')
+      return `<tr class="md-tr">${tds}</tr>`
+    })
+    .join('')
+  return `<table class="md-table"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`
+}
+
 export function renderMarkdown(text: string | null | undefined): string {
   if (!text) return ''
 
@@ -95,6 +121,16 @@ export function renderMarkdown(text: string | null | undefined): string {
   // Horizontal rules
   html = html.replace(/^---+\s*$/gm, '<hr class="md-hr" />')
 
+  // ── Step 3.5: tables ───────────────────────────────────────────────
+  // Taken out before the line-break pass: a table is a run of lines and
+  // would otherwise be turned into <br>-separated rows.
+  const tables: string[] = []
+  html = html.replace(/(?:^\|.*\|[ \t]*$\n?)+/gm, (block) => {
+    const key = `\x00TB${tables.length}\x00`
+    tables.push(block.replace(/\n$/, ''))
+    return key
+  })
+
   // ── Step 4: restore inline code before line-break handling ─────────
   for (let i = 0; i < inlines.length; i++) {
     const encoded = inlines[i]
@@ -102,6 +138,11 @@ export function renderMarkdown(text: string | null | undefined): string {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
     html = html.replace(`\x00IC${i}\x00`, `<code class="md-code-inline">${encoded}</code>`)
+  }
+
+  // ── Step 4.5: restore tables (their markup has no newlines) ────────
+  for (let i = 0; i < tables.length; i++) {
+    html = html.replace(`\x00TB${i}\x00`, renderTable(tables[i]))
   }
 
   // ── Step 5: line breaks ──────────────────────────────────────────
