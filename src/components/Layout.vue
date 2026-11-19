@@ -120,7 +120,8 @@
           @click="activeKey = t.key"
           @auxclick.middle.prevent="closeScriptTab(t)"
         >
-          <span class="tab-icon">📜</span>
+          <span v-if="t.dirty" class="tab-dot" title="Unsaved changes"></span>
+          <span v-else class="tab-icon">📜</span>
           <span class="tab-label">{{ t.title }}</span>
           <span class="tab-close" title="Close" @click.stop="closeScriptTab(t)">×</span>
         </button>
@@ -294,6 +295,7 @@ interface ScriptTab {
   id: number
   title: string
   uri: string
+  dirty: boolean
 }
 
 const fileTabs = ref<FileTab[]>([])
@@ -327,6 +329,8 @@ function onDocEdit(text: string) {
   if (!doc) return
   if (doc.kind === 'script') {
     scriptText.value = text
+    const tab = activeScript.value
+    if (tab) tab.dirty = true
     return
   }
   const file = activeFile.value
@@ -356,7 +360,7 @@ async function openScriptTab(id: number, name: string) {
     activeKey.value = key
     return
   }
-  const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}` }
+  const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}`, dirty: false }
   scriptTabs.value.push(tab)
   activeKey.value = key
   // The tab appears at once; the text follows and is applied when it arrives.
@@ -387,8 +391,9 @@ async function saveScript() {
       saveResult: data.saveResult ?? true,
       maxOutputSize: data.maxOutputSize ?? 10485760,
     })
+    tab.dirty = false
   } catch {
-    // Leave the text as it is: a failed write must not look saved.
+    // Leave the marker on: a failed write must not look saved.
   }
 }
 
@@ -427,6 +432,16 @@ watch(activeFile, async tab => {
   await pushActiveText()
 })
 const activeKey = ref<string>('view')
+
+watch(activeKey, async (_next, previous) => {
+  const file = fileTabs.value.find(t => t.key === previous)
+  if (file?.dirty) await saveTab(file)
+  if (scriptTabs.value.some(t => t.key === previous)) {
+    window.clearTimeout(scriptTimer)
+    await saveScript()
+  }
+})
+
 const saveTimers = new Map<string, number>()
 /** Files being read right now, so a double click cannot open the same file twice. */
 const opening = new Set<string>()
