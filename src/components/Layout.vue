@@ -362,19 +362,29 @@ async function openScriptTab(id: number, name: string) {
   }
   const tab: ScriptTab = { key, id, title: name, uri: `akiba://script/${id}`, dirty: false }
   scriptTabs.value.push(tab)
+  // The watcher below fetches the text; doing it here as well was the reason a double click
+  // produced two requests and, with a fast second click, two answers landing out of order.
   activeKey.value = key
-  // The tab appears at once; the text follows and is applied when it arrives.
-  await loadScriptText(id)
 }
 
+const loadingScripts = new Set<number>()
+
 async function loadScriptText(id: number) {
+  if (loadingScripts.has(id)) return
+  loadingScripts.add(id)
+  const key = `script:${id}`
   try {
     const { data } = await scriptApi.get(id)
+    // The answer is only applied if that tab is still the one on screen; otherwise a slow
+    // response would drop one script's text into another's tab.
+    if (activeKey.value !== key) return
     scriptText.value = data.code ?? ''
     await nextTick()
     await pushActiveText()
   } catch {
-    scriptText.value = ''
+    if (activeKey.value === key) scriptText.value = ''
+  } finally {
+    loadingScripts.delete(id)
   }
 }
 
@@ -418,11 +428,8 @@ watch(() => route.fullPath, () => {
   activeKey.value = 'view'
 })
 
-watch(activeScript, async tab => {
-  if (!tab) return
-  await loadScriptText(tab.id)
-  await nextTick()
-  await pushActiveText()
+watch(activeScript, tab => {
+  if (tab) void loadScriptText(tab.id)
 })
 
 // Whichever tab is showing, its text is pushed after the editor exists.
