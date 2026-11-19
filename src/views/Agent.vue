@@ -3055,8 +3055,44 @@ function withContext(rows: DiffRow[], radius: number): DiffRow[] {
  * exact edit; an overwrite or an append carries only the new text, so those say
  * what they added and nothing about removal.
  */
+/** The observation JSON of a tool message, without the "**Observation**: " prefix. */
+function parseToolResultJson(m: AgentMessage): Record<string, any> | null {
+  let text = m.toolResult || m.content || ''
+  const obsEnd = text.indexOf(':** ')
+  if (obsEnd >= 0) text = text.slice(obsEnd + 4)
+  text = fixLiteralNewlines(text).trim()
+  if (!text.startsWith('{')) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
 function writeDiff(m: AgentMessage): WriteDiff | null {
   if (m.role !== 'tool' || m.toolName !== 'write_workspace_file') return null
+
+  // The tool computed the diff when it wrote the file, with the line numbers of
+  // that file. Prefer it: it is stored with the transcript, so a conversation
+  // reopened tomorrow shows the same numbers.
+  const result = parseToolResultJson(m)
+  if (result && Array.isArray(result.diff) && result.diff.length) {
+    const rows: DiffRow[] = result.diff.slice(0, DIFF_ROW_LIMIT).map((r: any) => ({
+      kind: (r.k === '+' || r.k === '-' ? r.k : ' ') as DiffRow['kind'],
+      text: typeof r.t === 'string' ? r.t : '',
+      oldNo: typeof r.o === 'number' ? r.o : null,
+      newNo: typeof r.n === 'number' ? r.n : null,
+    }))
+    return {
+      label: result.diffAdded || result.diffRemoved ? 'File changed' : 'File written',
+      added: typeof result.diffAdded === 'number' ? result.diffAdded : rows.filter(r => r.kind === '+').length,
+      removed: typeof result.diffRemoved === 'number' ? result.diffRemoved : rows.filter(r => r.kind === '-').length,
+      rows,
+      truncated: result.diffTruncated === true || result.diff.length > rows.length,
+      hidden: Math.max(0, result.diff.length - rows.length),
+    }
+  }
+
   const args = parseToolArgs(m.toolResult || m.content || '')
   if (!args) return null
 
