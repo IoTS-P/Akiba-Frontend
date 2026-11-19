@@ -16,6 +16,7 @@
 
     <div v-if="menu" class="ctx" @click.stop>
       <div class="ctx-item" @click="download">Download</div>
+      <div v-if="isScript" class="ctx-item" @click="addToScripts">Add to scripts list</div>
       <template v-if="entry.directory">
         <div class="ctx-item" @click="startDraft('file')">New file…</div>
         <div class="ctx-item" @click="startDraft('folder')">New folder…</div>
@@ -53,7 +54,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { scriptApi } from '@/services/api'
 import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
 const props = withDefaults(defineProps<{
@@ -109,6 +111,31 @@ function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** Only .kts is a script: the workspace also holds notes, dumps and binaries. */
+const isScript = computed(() => !props.entry.directory && /\.kts$/i.test(props.entry.name))
+
+/** The library is a catalogue of reusable scripts, so this is an explicit choice —
+ *  runs no longer fill it up on their own. */
+async function addToScripts() {
+  menu.value = false
+  try {
+    const { data } = await workspaceApi.readFile(props.scope, props.entry.path)
+    if (data.binary) {
+      emit('error', 'This file is binary; it cannot become a script.')
+      return
+    }
+    await scriptApi.create({
+      name: props.entry.name.replace(/\.kts$/i, ''),
+      code: data.content,
+      language: 'kotlin',
+      description: `Imported from ${props.entry.path}`,
+    })
+    emit('changed')
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Could not add this script to the library.')
+  }
 }
 
 function download() {
