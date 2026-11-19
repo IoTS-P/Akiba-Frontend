@@ -32,7 +32,7 @@
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
       <!-- Agent lists conversations; the other activities still list their views. -->
-      <div v-if="isAgentActivity || isProjectsActivity || isFilesActivity || isScriptsActivity || isInstancesActivity || isModulesActivity" class="sidebar-split">
+      <div v-if="isAgentActivity || isProjectsActivity || isFilesActivity || isScriptsActivity || isInstancesActivity || isModulesActivity || isSkillsActivity" class="sidebar-split">
         <ProjectsSidebar
           v-if="isProjectsActivity"
           @open-workspace="openProgramWorkspace"
@@ -41,6 +41,7 @@
         <ScriptsSidebar v-else-if="isScriptsActivity" @open="openScriptTab" />
         <InstancesSidebar v-else-if="isInstancesActivity" />
         <ModulesSidebar v-else-if="isModulesActivity" />
+        <SkillsSidebar v-else-if="isSkillsActivity" @open-file="openSkillFile" />
         <AgentSidebar
           v-else-if="isAgentActivity"
           :active-id="activeSessionId"
@@ -67,7 +68,7 @@
       <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
-      <nav v-if="!isAgentActivity && !isProjectsActivity && !isFilesActivity && !isScriptsActivity && !isInstancesActivity && !isModulesActivity" class="nav">
+      <nav v-if="!isAgentActivity && !isProjectsActivity && !isFilesActivity && !isScriptsActivity && !isInstancesActivity && !isModulesActivity && !isSkillsActivity" class="nav">
         <button
           v-for="item in filteredViews"
           :key="item.path"
@@ -165,6 +166,7 @@ import FilesSidebar from '@/components/files/FilesSidebar.vue'
 import ScriptsSidebar from '@/components/scripts/ScriptsSidebar.vue'
 import InstancesSidebar from '@/components/instances/InstancesSidebar.vue'
 import ModulesSidebar from '@/components/modules/ModulesSidebar.vue'
+import SkillsSidebar from '@/components/skills/SkillsSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
@@ -223,6 +225,12 @@ const isFilesActivity = computed(() => route.path.startsWith('/files'))
 const isScriptsActivity = computed(() => route.path.startsWith('/scripts'))
 const isInstancesActivity = computed(() => route.path.startsWith('/instances'))
 const isModulesActivity = computed(() => route.path.startsWith('/modules'))
+const isSkillsActivity = computed(() => route.path.startsWith('/skills'))
+
+/** A skill's documents open like any other: same tabs, same editor. */
+function openSkillFile(skill: string, path: string) {
+  void openInScope({ kind: 'skill', name: skill }, path)
+}
 
 /** The program whose workspace is open below the project tree, if any. */
 const programScope = ref<WorkspaceScope | null>(null)
@@ -488,7 +496,16 @@ const sessionScope = computed<WorkspaceScope>(() => ({
 
 /** A tab is named by its file, and by where that file lives when the name is not enough. */
 function scopeLabel(scope: WorkspaceScope): string {
-  return scope.kind === 'session' ? 'agent' : scope.project
+  if (scope.kind === 'session') return 'agent'
+  if (scope.kind === 'skill') return scope.name
+  return scope.project
+}
+
+/** A stable identity for the scope, whatever kind it is. */
+function scopeId(scope: WorkspaceScope): string {
+  if (scope.kind === 'session') return scope.sessionId
+  if (scope.kind === 'skill') return `skill:${scope.name}`
+  return `${scope.project}/${scope.program}`
 }
 
 function relabelTabs() {
@@ -524,8 +541,8 @@ async function openInScope(scope: WorkspaceScope | null, path: string) {
       return
     }
     const tab: FileTab = {
-      key: `${scope.kind}:${scope.kind === 'session' ? scope.sessionId : scope.project + scope.program}:${path}`,
-      uri: `akiba://${scope.kind}/${scope.kind === 'session' ? scope.sessionId : scope.project + '/' + scope.program}/${path}`,
+      key: `${scope.kind}:${scopeId(scope)}:${path}`,
+      uri: `akiba://${scope.kind}/${scopeId(scope)}/${path}`,
       scope,
       path: data.path,
       title: data.path.split('/').pop() || data.path,

@@ -29,10 +29,15 @@ export interface WorkspaceFile {
 export type WorkspaceScope =
   | { kind: 'session'; sessionId: string }
   | { kind: 'program'; project: string; program: string }
+  /** A skill is a directory of documents with no project or conversation around it. */
+  | { kind: 'skill'; name: string }
 
 function baseOf(scope: WorkspaceScope): string {
   if (scope.kind === 'session') {
     return `/agent/sessions/${encodeURIComponent(scope.sessionId)}/workspace`
+  }
+  if (scope.kind === 'skill') {
+    return `/skills/${encodeURIComponent(scope.name)}/workspace`
   }
   return `/projects/${encodeURIComponent(scope.project)}/workspace`
 }
