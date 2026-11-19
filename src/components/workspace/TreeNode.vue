@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
 const props = withDefaults(defineProps<{
@@ -55,6 +55,13 @@ const emit = defineEmits<{
 const expanded = ref(false)
 const children = ref<WorkspaceEntry[]>([])
 const menu = ref(false)
+
+function closeMenu() {
+  menu.value = false
+}
+
+onMounted(() => window.addEventListener('click', closeMenu))
+onUnmounted(() => window.removeEventListener('click', closeMenu))
 
 function activate() {
   menu.value = false
