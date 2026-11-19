@@ -32,7 +32,7 @@
         <span class="sidebar-title">{{ currentRoute }}</span>
       </div>
       <!-- Agent lists conversations; the other activities still list their views. -->
-      <div v-if="isAgentActivity || isProjectsActivity || isFilesActivity || isScriptsActivity || isInstancesActivity" class="sidebar-split">
+      <div v-if="isAgentActivity || isProjectsActivity || isFilesActivity || isScriptsActivity || isInstancesActivity || isModulesActivity" class="sidebar-split">
         <ProjectsSidebar
           v-if="isProjectsActivity"
           @open-workspace="openProgramWorkspace"
@@ -40,6 +40,7 @@
         <FilesSidebar v-else-if="isFilesActivity" />
         <ScriptsSidebar v-else-if="isScriptsActivity" @open="openScriptTab" />
         <InstancesSidebar v-else-if="isInstancesActivity" />
+        <ModulesSidebar v-else-if="isModulesActivity" />
         <AgentSidebar
           v-else-if="isAgentActivity"
           :active-id="activeSessionId"
@@ -66,7 +67,7 @@
       <div v-else class="sidebar-search">
         <input v-model="filter" type="search" placeholder="Filter views…" aria-label="Filter views" />
       </div>
-      <nav v-if="!isAgentActivity && !isProjectsActivity && !isFilesActivity && !isScriptsActivity && !isInstancesActivity" class="nav">
+      <nav v-if="!isAgentActivity && !isProjectsActivity && !isFilesActivity && !isScriptsActivity && !isInstancesActivity && !isModulesActivity" class="nav">
         <button
           v-for="item in filteredViews"
           :key="item.path"
@@ -163,6 +164,7 @@ import ProjectsSidebar from '@/components/projects/ProjectsSidebar.vue'
 import FilesSidebar from '@/components/files/FilesSidebar.vue'
 import ScriptsSidebar from '@/components/scripts/ScriptsSidebar.vue'
 import InstancesSidebar from '@/components/instances/InstancesSidebar.vue'
+import ModulesSidebar from '@/components/modules/ModulesSidebar.vue'
 import WorkspacePanel from '@/components/workspace/WorkspacePanel.vue'
 import WorkspaceEditor from '@/components/workspace/WorkspaceEditor.vue'
 import { scriptApi } from '@/services/api'
@@ -220,6 +222,7 @@ const isProjectsActivity = computed(() => route.path.startsWith('/projects'))
 const isFilesActivity = computed(() => route.path.startsWith('/files'))
 const isScriptsActivity = computed(() => route.path.startsWith('/scripts'))
 const isInstancesActivity = computed(() => route.path.startsWith('/instances'))
+const isModulesActivity = computed(() => route.path.startsWith('/modules'))
 
 /** The program whose workspace is open below the project tree, if any. */
 const programScope = ref<WorkspaceScope | null>(null)

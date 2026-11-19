@@ -34,7 +34,13 @@
     >
       <template v-if="ctx.instance">
         <div class="ctx-item" @click="useInstance">Switch to this instance</div>
-        <div class="ctx-item" @click="backup">Back up…</div>
+        <div class="ctx-item" @click="backupOpen = !backupOpen">
+          Back up <span class="chevron">▸</span>
+        </div>
+        <template v-if="backupOpen">
+          <div class="ctx-item sub" @click="backup(false)">Database only</div>
+          <div class="ctx-item sub" @click="backup(true)">Everything, files included</div>
+        </template>
         <div class="ctx-item" @click="toggleRun">{{ ctx.running ? 'Stop' : 'Start' }}</div>
         <div class="ctx-sep"></div>
         <div class="ctx-item danger" @click="remove">Delete instance</div>
@@ -60,6 +66,8 @@ const error = ref('')
 /** Selection is local: choosing an instance here must not change what the rest of the app reads. */
 const picked = ref<string | null>(null)
 const ctx = reactive({ show: false, x: 0, y: 0, instance: '', running: false })
+/** The backup choices live one level down; a text prompt made people guess what to type. */
+const backupOpen = ref(false)
 
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -76,6 +84,7 @@ function statusLabel(i: InstanceSummary): string {
 
 function menu(ev: MouseEvent, name: string) {
   const found = store.available.find(i => i.name === name)
+  backupOpen.value = false
   ctx.show = true
   ctx.x = ev.clientX
   ctx.y = ev.clientY
@@ -102,12 +111,23 @@ function useInstance() {
   window.location.reload()
 }
 
-async function backup() {
+/**
+ * Back up an instance.
+ *
+ * The two kinds are the two things people actually mean: the database on its own, or everything
+ * that makes the instance reproducible. The label is generated, because asking for one made the
+ * choice look like a form rather than an action.
+ */
+async function backup(isFull: boolean) {
   const name = ctx.instance
   ctx.show = false
-  const alias = window.prompt('Backup label (optional)', '') ?? ''
+  backupOpen.value = false
   try {
-    await instanceApi.backup({ instanceName: name, alias: alias || undefined })
+    await instanceApi.backup({
+      instanceName: name,
+      isFull,
+      alias: `${isFull ? 'full' : 'db'}-${new Date().toISOString().slice(0, 16).replace('T', '-')}`,
+    })
     await store.refresh()
   } catch (e: any) {
     error.value = e?.response?.data?.error || 'Backup failed.'
@@ -268,6 +288,16 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
 .ctx-item.danger:hover {
   background: var(--akiba-danger);
+}
+
+.ctx-item.sub {
+  padding-left: 22px;
+  color: var(--akiba-chat-text-muted);
+}
+
+.chevron {
+  float: right;
+  color: var(--akiba-chat-text-faint);
 }
 
 .ctx-sep {
