@@ -147,10 +147,6 @@
         </div>
       </div>
 
-      <div v-show="activeKey === 'view'" class="content">
-        <router-view />
-      </div>
-
     </main>
   </div>
 </template>
