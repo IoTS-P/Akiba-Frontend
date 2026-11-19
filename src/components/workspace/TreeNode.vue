@@ -16,9 +16,25 @@
 
     <div v-if="menu" class="ctx" @click.stop>
       <div class="ctx-item" @click="download">Download</div>
-      <div v-if="entry.directory" class="ctx-item" @click="newFolder">New folder</div>
+      <template v-if="entry.directory">
+        <div class="ctx-item" @click="startDraft('file')">New file…</div>
+        <div class="ctx-item" @click="startDraft('folder')">New folder…</div>
+        <div class="ctx-sep"></div>
+      </template>
       <div class="ctx-sep"></div>
       <div class="ctx-item danger" @click="remove">Delete</div>
+    </div>
+
+    <div v-if="draft.kind" class="draft" :style="{ paddingLeft: (depth * 12 + 24) + 'px' }">
+      <input
+        ref="draftInput"
+        v-model="draft.name"
+        class="draft-input"
+        :placeholder="draft.kind === 'file' ? 'File name' : 'Folder name'"
+        @keyup.enter="commitDraft"
+        @keyup.esc="draft.kind = ''"
+        @blur="commitDraft"
+      />
     </div>
 
     <template v-if="entry.directory && expanded">
@@ -37,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
 const props = withDefaults(defineProps<{
@@ -55,6 +71,8 @@ const emit = defineEmits<{
 const expanded = ref(false)
 const children = ref<WorkspaceEntry[]>([])
 const menu = ref(false)
+const draft = reactive({ kind: '' as '' | 'file' | 'folder', name: '' })
+const draftInput = ref<HTMLInputElement | null>(null)
 
 function closeMenu() {
   menu.value = false
@@ -98,16 +116,31 @@ function download() {
   window.open(workspaceApi.downloadUrl(props.scope, props.entry.path), '_blank')
 }
 
-async function newFolder() {
+/** A new entry is typed in place, the way an editor does it, not in a dialog. */
+function startDraft(kind: 'file' | 'folder') {
   menu.value = false
-  const name = window.prompt('Folder name')
-  if (!name) return
+  draft.kind = kind
+  draft.name = ''
+  expanded.value = true
+  void loadChildren()
+  nextTick(() => draftInput.value?.focus())
+}
+
+async function commitDraft() {
+  const kind = draft.kind
+  const name = draft.name.trim()
+  if (!kind || !name) {
+    draft.kind = ''
+    return
+  }
+  const path = `${props.entry.path}/${name}`
+  draft.kind = ''
   try {
-    // A folder exists once something is written into it; an empty marker keeps it addressable.
-    await workspaceApi.writeFile(props.scope, `${props.entry.path}/${name}/.keep`, '')
+    if (kind === 'folder') await workspaceApi.createDirectory(props.scope, path)
+    else await workspaceApi.writeFile(props.scope, path, '')
     onChildChanged()
-  } catch {
-    emit('error', 'Could not create the folder.')
+  } catch (e: any) {
+    emit('error', e?.response?.data?.error || 'Could not create the entry.')
   }
 }
 
@@ -194,6 +227,21 @@ async function onDrop(ev: DragEvent) {
 
 .ctx-item.danger:hover {
   background: var(--akiba-danger);
+}
+
+.draft {
+  padding: 2px 0;
+}
+
+.draft-input {
+  width: 90%;
+  padding: 1px 4px;
+  font-size: 12px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-editor-foreground);
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: 2px;
+  outline: none;
 }
 
 .ctx-sep {

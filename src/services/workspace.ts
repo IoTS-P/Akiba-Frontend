@@ -61,6 +61,11 @@ export const workspaceApi = {
       { params: { path, ...extra(scope) }, headers: { 'Content-Type': 'text/plain' } },
     ),
 
+  createDirectory: (scope: WorkspaceScope, path: string) =>
+    api.post<{ status: string; path: string }>(`${baseOf(scope)}/directory`, null, {
+      params: { path },
+    }),
+
   upload: (scope: WorkspaceScope, path: string, file: File) => {
     const form = new FormData()
     form.append('file', file, file.name)

@@ -8,6 +8,18 @@
     </div>
 
     <div class="panel-body" :class="{ dragging }" @contextmenu.self.prevent="blankMenu($event)">
+      <div v-if="draft.kind" class="draft">
+        <input
+          ref="draftInput"
+          v-model="draft.name"
+          class="draft-input"
+          :placeholder="draft.kind === 'file' ? 'File name' : 'Folder name'"
+          @keyup.enter="commitDraft"
+          @keyup.esc="draft.kind = ''"
+          @blur="commitDraft"
+        />
+      </div>
+
       <div v-if="error" class="hint error">{{ error }}</div>
       <div v-else-if="!tree.length" class="hint">Empty workspace. Drop files here to upload.</div>
 
@@ -28,14 +40,14 @@
       :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
       @click.self="ctx.show = false"
     >
-      <div class="ctx-item" @click="newFile">New file…</div>
-      <div class="ctx-item" @click="newFolder">New folder…</div>
+      <div class="ctx-item" @click="startDraft('file')">New file…</div>
+      <div class="ctx-item" @click="startDraft('folder')">New folder…</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import TreeNode from '@/components/workspace/TreeNode.vue'
 import { workspaceApi, type WorkspaceEntry, type WorkspaceScope } from '@/services/workspace'
 
@@ -57,28 +69,31 @@ function closeMenu() {
   ctx.show = false
 }
 
-async function newFile() {
+const draft = reactive({ kind: '' as '' | 'file' | 'folder', name: '' })
+const draftInput = ref<HTMLInputElement | null>(null)
+
+/** Typed in place, like an editor: a dialog in the middle of the screen breaks the flow. */
+function startDraft(kind: 'file' | 'folder') {
   ctx.show = false
-  const name = window.prompt('New file name')
-  if (!name) return
-  try {
-    await workspaceApi.writeFile(props.scope, name, '')
-    await load('')
-  } catch {
-    error.value = 'Could not create the file.'
-  }
+  draft.kind = kind
+  draft.name = ''
+  nextTick(() => draftInput.value?.focus())
 }
 
-/** A folder exists once something is in it; the marker keeps it addressable. */
-async function newFolder() {
-  ctx.show = false
-  const name = window.prompt('New folder name')
-  if (!name) return
+async function commitDraft() {
+  const kind = draft.kind
+  const name = draft.name.trim()
+  if (!kind || !name) {
+    draft.kind = ''
+    return
+  }
+  draft.kind = ''
   try {
-    await workspaceApi.writeFile(props.scope, `${name}/.keep`, '')
+    if (kind === 'folder') await workspaceApi.createDirectory(props.scope, name)
+    else await workspaceApi.writeFile(props.scope, name, '')
     await load('')
-  } catch {
-    error.value = 'Could not create the folder.'
+  } catch (e: any) {
+    error.value = e?.response?.data?.error || 'Could not create the entry.'
   }
 }
 
@@ -199,6 +214,22 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 .ctx-item:hover {
   background: var(--vscode-focusBorder);
   color: #fff;
+}
+
+.draft {
+  padding: 2px 10px 4px;
+}
+
+.draft-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 1px 4px;
+  font-size: 12px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-editor-foreground);
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: 2px;
+  outline: none;
 }
 
 .hint {
