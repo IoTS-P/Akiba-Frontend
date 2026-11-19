@@ -101,6 +101,16 @@
     <!-- Editor area: the tab bar, the page, nothing below it. -->
     <main class="editor">
       <div class="tab-bar">
+        <!-- The page itself is a tab: with files open, an activity icon was the only
+             way back to it, which is not where anyone looks. -->
+        <button
+          class="tab tab-page"
+          :class="{ active: activeKey === 'view' }"
+          :title="pageTabTitle"
+          @click="activeKey = 'view'"
+        >
+          <span class="tab-label">{{ pageTabTitle }}</span>
+        </button>
         <button
           v-for="t in fileTabs"
           :key="t.key"
@@ -208,6 +218,12 @@ const filter = ref('')
 const filteredViews = computed(() => {
   const q = filter.value.trim().toLowerCase()
   return q ? allViews.value.filter(v => v.title.toLowerCase().includes(q)) : allViews.value
+})
+
+/** Name of the tab that belongs to the page itself. */
+const pageTabTitle = computed(() => {
+  const hit = allViews.value.find(v => (v.path === '/' ? route.path === '/' : route.path.startsWith(v.path)))
+  return hit?.title ?? 'Page'
 })
 
 function isActive(path: string): boolean {

@@ -231,7 +231,13 @@
             </div>
             <div v-else-if="m.role === 'tool'" :class="['tool-call', toolStatus(m)]">
               <details>
-                <summary>{{ toolSummary(m) }}</summary>
+                <summary>
+                  {{ toolSummary(m) }}
+                  <span v-if="writeDiff(m)" class="diff-badge">
+                    <span class="diff-add">+{{ writeDiff(m)!.added }}</span>
+                    <span v-if="writeDiff(m)!.removed > 0" class="diff-del">−{{ writeDiff(m)!.removed }}</span>
+                  </span>
+                </summary>
                 <div class="tool-detail">
                   <!-- Parameters section: nested <details> so the user
                        can independently collapse just the args even when
@@ -240,6 +246,20 @@
                        v-for key on the message). Default `open` matches
                        the legacy behaviour where parameters were always
                        visible alongside the output. -->
+                  <div v-if="writeDiff(m)" class="tool-section tool-diff-section">
+                    <div class="tool-label">{{ writeDiff(m)!.label }}</div>
+                    <div class="diff-view">
+                      <div
+                        v-for="(row, i) in writeDiff(m)!.rows"
+                        :key="i"
+                        class="diff-row"
+                        :class="row.kind === '+' ? 'diff-row-add' : 'diff-row-del'"
+                      >{{ row.kind }} {{ row.text }}</div>
+                      <div v-if="writeDiff(m)!.truncated" class="diff-row diff-row-more">
+                        … {{ writeDiff(m)!.hidden }} more line(s)
+                      </div>
+                    </div>
+                  </div>
                   <details class="tool-params-block" open>
                     <summary>Parameters</summary>
                     <pre class="tool-args-text">{{ toolArgs(m) }}</pre>
@@ -2912,6 +2932,77 @@ function toolSummary(m: AgentMessage): string {
     }
   }
   return `🛠 ${name}`
+}
+
+interface DiffRow {
+  kind: '+' | '-'
+  text: string
+}
+
+interface WriteDiff {
+  label: string
+  added: number
+  removed: number
+  rows: DiffRow[]
+  truncated: boolean
+  hidden: number
+}
+
+const DIFF_ROW_LIMIT = 300
+
+/**
+ * `write_workspace_file` is the one tool whose result is a document change.
+ * It is shown as a diff rather than as JSON: the arguments *are* the edit, and
+ * `oldString`/`newString` give the removed and added lines exactly.
+ *
+ * A full overwrite carries no previous text, so only its added lines are known
+ * — saying so is better than inventing deletions that never happened.
+ */
+function writeDiff(m: AgentMessage): WriteDiff | null {
+  if (m.role !== 'tool' || m.toolName !== 'write_workspace_file') return null
+  const args = parseToolArgs(m.toolResult || m.content || '')
+  if (!args) return null
+
+  const oldText = typeof args.oldString === 'string' ? args.oldString : ''
+  const newText = typeof args.newString === 'string' ? args.newString : ''
+  const content = typeof args.content === 'string' ? args.content : ''
+
+  const toLines = (text: string): string[] => {
+    if (!text) return []
+    const lines = text.split('\n')
+    if (lines.length && lines[lines.length - 1] === '') lines.pop()
+    return lines
+  }
+
+  let removedLines: string[] = []
+  let addedLines: string[] = []
+  let label = ''
+
+  if (oldText || newText) {
+    removedLines = toLines(oldText)
+    addedLines = toLines(newText)
+    label = args.replaceAll ? 'Replace all occurrences' : 'Replace'
+  } else if (content) {
+    addedLines = toLines(content)
+    label = args.append ? 'Append to file' : 'Write file'
+  } else {
+    return null
+  }
+
+  const combined: DiffRow[] = [
+    ...removedLines.map(text => ({ kind: '-' as const, text })),
+    ...addedLines.map(text => ({ kind: '+' as const, text })),
+  ]
+  const rows = combined.slice(0, DIFF_ROW_LIMIT)
+
+  return {
+    label,
+    added: addedLines.length,
+    removed: removedLines.length,
+    rows,
+    truncated: combined.length > rows.length,
+    hidden: combined.length - rows.length,
+  }
 }
 
 function toolArgs(m: AgentMessage): string {

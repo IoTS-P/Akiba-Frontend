@@ -152,3 +152,38 @@ pre {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Diff rendering for write_workspace_file: a line is red because it went away,
+   green because it arrived. Nothing else in the card changes colour. */
+.diff-badge {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-add { color: #8bd18b; }
+.diff-del { color: #ff8f8f; }
+
+.diff-view {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  background: var(--vscode-editor-background);
+}
+
+.diff-row {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-row-add { background: rgba(64, 168, 96, 0.18); }
+.diff-row-del { background: rgba(214, 68, 68, 0.18); }
+.diff-row-more { color: var(--akiba-chat-text-faint); font-style: italic; }
