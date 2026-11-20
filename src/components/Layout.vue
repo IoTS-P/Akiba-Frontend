@@ -37,7 +37,7 @@
           v-if="isProjectsActivity"
           @open-workspace="openProgramWorkspace"
         />
-        <FilesSidebar v-else-if="isFilesActivity" />
+        <FilesSidebar v-else-if="isFilesActivity" @open="openRecordTab" />
         <ScriptsSidebar v-else-if="isScriptsActivity" @open="openScriptTab" />
         <InstancesSidebar v-else-if="isInstancesActivity" />
         <ModulesSidebar v-else-if="isModulesActivity" />
@@ -138,6 +138,19 @@
           <span class="tab-label">{{ t.title }}</span>
           <span class="tab-close" title="Close" @click.stop="closeScriptTab(t)">×</span>
         </button>
+        <button
+          v-for="t in recordTabs"
+          :key="t.key"
+          class="tab"
+          :class="{ active: activeKey === t.key }"
+          :title="t.title"
+          @click="activeKey = t.key"
+          @auxclick.middle.prevent="closeRecordTab(t)"
+        >
+          <span class="tab-icon">🗃</span>
+          <span class="tab-label">{{ t.title }}</span>
+          <span class="tab-close" title="Close" @click.stop="closeRecordTab(t)">×</span>
+        </button>
         <div class="tab-spacer"></div>
         <SystemStatus />
       </div>
@@ -146,7 +159,11 @@
         <router-view />
       </div>
 
-      <div v-if="activeDoc" class="file-body">
+      <div v-if="activeRecord" class="file-body">
+        <RecordEditor :key="activeRecord.key" :file-id="activeRecord.fileId" :title="activeRecord.title" />
+      </div>
+
+      <div v-else-if="activeDoc" class="file-body">
         <WorkspaceEditor
           v-if="activeDoc.text !== null"
           ref="docEditorRef"
@@ -173,6 +190,7 @@ import SystemStatus from '@/components/SystemStatus.vue'
 import AgentSidebar from '@/components/sidebar/AgentSidebar.vue'
 import ProjectsSidebar from '@/components/projects/ProjectsSidebar.vue'
 import FilesSidebar from '@/components/files/FilesSidebar.vue'
+import RecordEditor from '@/components/files/RecordEditor.vue'
 import ScriptsSidebar from '@/components/scripts/ScriptsSidebar.vue'
 import InstancesSidebar from '@/components/instances/InstancesSidebar.vue'
 import ModulesSidebar from '@/components/modules/ModulesSidebar.vue'
@@ -337,6 +355,15 @@ interface ScriptTab {
   dirty: boolean
 }
 
+/** A binary's record, opened as its own tab so a big table can be edited at once. */
+interface RecordTab {
+  key: string
+  fileId: number
+  title: string
+}
+
+const recordTabs = ref<RecordTab[]>([])
+
 const fileTabs = ref<FileTab[]>([])
 const scriptTabs = ref<ScriptTab[]>([])
 const scriptText = ref('')
@@ -349,6 +376,10 @@ interface ActiveDoc {
   text: string | null
   kind: 'file' | 'script'
 }
+
+const activeRecord = computed(() =>
+  recordTabs.value.find(t => t.key === activeKey.value) ?? null
+)
 
 const activeDoc = computed<ActiveDoc | null>(() => {
   const script = activeScript.value
@@ -393,6 +424,21 @@ const activeFile = computed(() => fileTabs.value.find(t => t.key === activeKey.v
 const activeScript = computed(() => scriptTabs.value.find(t => t.key === activeKey.value) ?? null)
 
 /** A script opens in the same tab strip as a file; the editor does not care which it is. */
+function openRecordTab(fileId: number, name: string) {
+  const key = `record:${fileId}`
+  if (!recordTabs.value.some(t => t.key === key)) {
+    recordTabs.value.push({ key, fileId, title: name })
+  }
+  activeKey.value = key
+}
+
+function closeRecordTab(tab: RecordTab) {
+  const index = recordTabs.value.findIndex(t => t.key === tab.key)
+  if (index === -1) return
+  recordTabs.value.splice(index, 1)
+  if (activeKey.value === tab.key) activeKey.value = 'view'
+}
+
 async function openScriptTab(id: number, name: string) {
   const key = `script:${id}`
   const existing = scriptTabs.value.find(t => t.key === key)

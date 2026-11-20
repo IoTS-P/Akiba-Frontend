@@ -17,6 +17,7 @@
         :class="{ selected: selectedId === f.id }"
         :title="f.name"
         @click="select(f)"
+        @dblclick="$emit('open', f.id, f.name)"
         @contextmenu.prevent="openFileMenu($event, f)"
       >
         <span class="id">{{ f.id }}</span>
@@ -89,6 +90,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { fileApi, type FileEntry, type RecordRow, type RecordTable } from '@/services/api'
+
+defineEmits<{ open: [id: number, name: string] }>()
 
 const PAGE = 50
 const SHORT_LIMIT = 200
