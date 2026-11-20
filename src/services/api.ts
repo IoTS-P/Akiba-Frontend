@@ -390,7 +390,24 @@ export const fileApi = {
       params: { q: query }
     }),
   delete: (fileIds: number[]) =>
-    api.delete<{ message: string }>('/files', { data: { fileIds } })
+    api.delete<{ message: string }>('/files', { data: { fileIds } }),
+  /** One binary row: the metadata the loader will use when it opens this file. */
+  get: (id: number) => api.get<BinaryDetail>(`/files/${id}`),
+  /** Correct arch/format/compilerSpec; the only writable columns, and only these. */
+  updateMetadata: (id: number, patch: { arch?: string; format?: string; compilerSpec?: string }) =>
+    api.patch<BinaryDetail>(`/files/${id}`, patch)
+}
+
+export interface BinaryDetail {
+  id: number
+  originalPath: string
+  arch?: string | null
+  format?: string | null
+  compilerSpec?: string | null
+  checksum?: string | null
+  size?: number | null
+  processedPath?: string | null
+  processedChecksum?: string | null
 }
 
 export interface SystemMetrics {
