@@ -395,7 +395,19 @@ export const fileApi = {
   get: (id: number) => api.get<BinaryDetail>(`/files/${id}`),
   /** Correct arch/format/compilerSpec; the only writable columns, and only these. */
   updateMetadata: (id: number, patch: { arch?: string; format?: string; compilerSpec?: string }) =>
-    api.patch<BinaryDetail>(`/files/${id}`, patch)
+    api.patch<BinaryDetail>(`/files/${id}`, patch),
+  /** Every table that holds a row for this binary, plus whether editing is allowed. */
+  records: (id: number) =>
+    api.get<{ records: { id: number; tables?: RecordTable[] }; canEdit?: boolean }>(`/files/${id}/records`),
+  /** One column of one row; the daemon decides what may be written. */
+  updateRecord: (table: string, id: number, column: string, value: string) =>
+    api.patch<{ updated: boolean }>(`/records/${table}/${id}`, { column, value })
+}
+
+export interface RecordTable {
+  name: string
+  columns: { name: string; type: string }[]
+  rows: Record<string, unknown>[]
 }
 
 export interface BinaryDetail {

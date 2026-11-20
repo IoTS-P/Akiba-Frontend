@@ -17,7 +17,7 @@
         :class="{ selected: selectedId === f.id }"
         :title="f.name"
         @click="select(f)"
-        @contextmenu.prevent="openMenu($event, f)"
+        @contextmenu.prevent="openFileMenu($event, f)"
       >
         <span class="id">{{ f.id }}</span>
         <span class="divider"></span>
@@ -27,137 +27,128 @@
       <button v-if="hasMore && !query" class="more" @click="loadMore">Load more</button>
     </div>
 
-    <div
-      v-if="ctx.show"
-      class="ctx"
-      :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
-      @click.self="ctx.show = false"
-    >
-      <div class="ctx-item danger" @click="remove">Delete file</div>
+    <!-- A binary id is more than one row: sessions, executions and whatever a
+         module wrote all point at it, and the record is all of them. -->
+    <div v-if="records.length" class="detail">
+      <div class="detail-name" :title="selectedName">{{ selectedName }}</div>
+
+      <details v-for="table in records" :key="table.name" class="table-block" open>
+        <summary>
+          <span class="table-name">{{ table.name }}</span>
+          <span class="table-count">{{ table.rows.length }}</span>
+        </summary>
+
+        <div v-for="(row, rowIndex) in table.rows" :key="rowIndex" class="row-block">
+          <div v-for="column in table.columns" :key="column.name" class="field">
+            <span class="label">{{ column.name }}</span>
+
+            <input
+              v-if="editing.key === `${table.name}.${rowIndex}.${column.name}`"
+              v-model="draft"
+              class="edit-input"
+              @keyup.enter="commitEdit(table, row, rowIndex, column.name)"
+              @keyup.esc="editing.key = ''"
+              @blur="commitEdit(table, row, rowIndex, column.name)"
+            />
+            <span
+              v-else
+              class="value"
+              :class="{
+                editable: isEditable(table, row, column.name),
+                long: isLong(row[column.name]),
+              }"
+              :title="fullValue(row[column.name])"
+              @click="isEditable(table, row, column.name) && startEdit(table.name, rowIndex, column.name, row)"
+              @contextmenu.prevent="openValueMenu($event, row[column.name])"
+            >{{ shortValue(row[column.name]) }}<span v-if="isLong(row[column.name])" class="length"> ({{ lengthOf(row[column.name]) }} chars)</span></span>
+          </div>
+        </div>
+      </details>
+
+      <div v-if="!canEdit" class="hint">Editing records is disabled on this deployment.</div>
     </div>
 
-    <!-- A file is not just its name: the row carries the architecture the loader
-         will use, and getting that wrong is why an import opens as raw bytes. -->
-    <div v-if="detail" class="detail">
-      <div class="detail-name" :title="detail.originalPath">{{ baseName(detail.originalPath) }}</div>
-
-      <div v-for="field in fields" :key="field.key" class="field">
-        <span class="label">{{ field.label }}</span>
-        <input
-          v-if="editing === field.key"
-          ref="editInput"
-          v-model="draft"
-          class="edit-input"
-          :placeholder="field.label"
-          @keyup.enter="commitEdit"
-          @keyup.esc="editing = ''"
-          @blur="commitEdit"
-        />
-        <span
-          v-else
-          class="value"
-          :class="{ editable: field.editable, empty: !field.value }"
-          :title="field.editable ? 'Click to change' : ''"
-          @click="field.editable && startEdit(field.key)"
-        >{{ field.value || (field.editable ? 'set' : '—') }}</span>
-      </div>
-
-      <div v-if="saveError" class="hint error">{{ saveError }}</div>
+    <div
+      v-if="menu.show"
+      class="ctx"
+      :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+    >
+      <template v-if="menu.kind === 'value'">
+        <div class="ctx-item" @click="copyValue">Copy value</div>
+      </template>
+      <template v-else>
+        <div class="ctx-item danger" @click="remove">Delete file</div>
+      </template>
     </div>
 
     <div v-if="error" class="hint error">{{ error }}</div>
+    <div v-if="saveError" class="hint error">{{ saveError }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { fileApi, type BinaryDetail, type FileEntry } from '@/services/api'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { fileApi, type FileEntry, type RecordTable } from '@/services/api'
 
 const PAGE = 50
+const SHORT_LIMIT = 200
+const LONG_HINT = 10 * 1024
 
 const files = ref<FileEntry[]>([])
 const query = ref('')
 const loading = ref(false)
 const hasMore = ref(false)
 const error = ref('')
-const ctx = reactive({ show: false, x: 0, y: 0, file: null as FileEntry | null })
+const saveError = ref('')
 
 const selectedId = ref<number | null>(null)
-const detail = ref<BinaryDetail | null>(null)
-const editing = ref('')
+const selectedName = ref('')
+const records = ref<RecordTable[]>([])
+const canEdit = ref(true)
+
+const editing = reactive({ key: '' })
 const draft = ref('')
-const saveError = ref('')
-const editInput = ref<HTMLInputElement[] | null>(null)
 
-const baseName = (path: string | null | undefined): string =>
-  (path ?? '').split('/').filter(Boolean).pop() ?? ''
-
-const formatSize = (bytes: number | null | undefined): string => {
-  if (bytes == null) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** Read-only rows are shown; only the three the importer guesses can be changed. */
-const fields = computed(() => {
-  const d = detail.value
-  if (!d) return []
-  return [
-    { key: 'format', label: 'Format', value: d.format ?? '', editable: true },
-    { key: 'arch', label: 'Architecture', value: d.arch ?? '', editable: true },
-    { key: 'compilerSpec', label: 'Compiler', value: d.compilerSpec ?? '', editable: true },
-    { key: 'size', label: 'Size', value: formatSize(d.size), editable: false },
-    { key: 'checksum', label: 'MD5', value: d.checksum ?? '', editable: false },
-    { key: 'originalPath', label: 'Source', value: d.originalPath ?? '', editable: false },
-  ]
+const menu = reactive({
+  show: false,
+  x: 0,
+  y: 0,
+  kind: 'file' as 'file' | 'value',
+  file: null as FileEntry | null,
+  value: '' as string,
 })
 
-async function select(file: FileEntry) {
-  selectedId.value = file.id
-  editing.value = ''
-  saveError.value = ''
-  try {
-    const { data } = await fileApi.get(file.id)
-    detail.value = data
-  } catch (e: any) {
-    saveError.value = e?.response?.data?.error || 'Could not read this file record.'
-  }
+/** Columns a correction must never rewrite: identity, size and what was imported. */
+const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path', 'processed_checksum'])
+
+function rowId(row: Record<string, unknown>): number | null {
+  const value = row['id']
+  return typeof value === 'number' ? value : null
 }
 
-function startEdit(key: string) {
-  const field = fields.value.find(f => f.key === key)
-  editing.value = key
-  draft.value = field?.value ?? ''
-  saveError.value = ''
-  nextTick(() => {
-    const input = editInput.value?.[0]
-    input?.focus()
-    input?.select()
-  })
+function isEditable(table: RecordTable, row: Record<string, unknown>, column: string): boolean {
+  if (!canEdit.value) return false
+  if (table.name === 'binaries' && PROTECTED.has(column)) return false
+  return rowId(row) !== null
 }
 
-async function commitEdit() {
-  const key = editing.value
-  if (!key || !detail.value) return
-  const value = draft.value.trim()
-  editing.value = ''
-  if (!value) return
-  const field = fields.value.find(f => f.key === key)
-  if (field && value === field.value) return
-  try {
-    const { data } = await fileApi.updateMetadata(detail.value.id, { [key]: value })
-    detail.value = data
-    // Keep the list in step: the row shows what the record says.
-    const row = files.value.find(f => f.id === data.id)
-    if (row) {
-      row.arch = data.arch ?? undefined
-      row.compilerSpec = data.compilerSpec ?? undefined
-      row.type = data.format ?? row.type
-    }
-  } catch (e: any) {
-    saveError.value = e?.response?.data?.error || 'Could not save that change.'
-  }
+function lengthOf(value: unknown): number {
+  if (value == null) return 0
+  return typeof value === 'string' ? value.length : JSON.stringify(value).length
+}
+
+function isLong(value: unknown): boolean {
+  return lengthOf(value) > LONG_HINT
+}
+
+function fullValue(value: unknown): string {
+  if (value == null) return ''
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function shortValue(value: unknown): string {
+  const text = fullValue(value).replace(/\s+/g, ' ')
+  return text.length > SHORT_LIMIT ? `${text.slice(0, SHORT_LIMIT)}…` : (text || '—')
 }
 
 async function load(offset = 0) {
@@ -195,25 +186,98 @@ function onSearch() {
   }, 250)
 }
 
-function openMenu(ev: MouseEvent, file: FileEntry) {
-  ctx.show = true
-  ctx.x = ev.clientX
-  ctx.y = ev.clientY
-  ctx.file = file
+async function select(file: FileEntry) {
+  selectedId.value = file.id
+  selectedName.value = file.name
+  editing.key = ''
+  saveError.value = ''
+  records.value = []
+  try {
+    const { data } = await fileApi.records(file.id)
+    const payload = (data.records ?? {}) as { tables?: RecordTable[] }
+    records.value = payload.tables ?? []
+    canEdit.value = data.canEdit !== false
+  } catch (e: any) {
+    saveError.value = e?.response?.data?.error || 'Could not read this record.'
+  }
+}
+
+function startEdit(table: string, rowIndex: number, column: string, row: Record<string, unknown>) {
+  editing.key = `${table}.${rowIndex}.${column}`
+  draft.value = row[column] == null ? '' : String(row[column])
+}
+
+async function commitEdit(
+  table: RecordTable,
+  row: Record<string, unknown>,
+  rowIndex: number,
+  column: string,
+) {
+  const key = `${table.name}.${rowIndex}.${column}`
+  if (editing.key !== key) return
+  const value = draft.value
+  editing.key = ''
+  if (value === String(row[column] ?? '')) return
+  const id = rowId(row)
+  if (id === null) return
+  try {
+    await fileApi.updateRecord(table.name, id, column, value)
+    row[column] = value
+    saveError.value = ''
+  } catch (e: any) {
+    saveError.value = e?.response?.data?.error || 'Could not save that change.'
+  }
+}
+
+function openFileMenu(ev: MouseEvent, file: FileEntry) {
+  menu.show = true
+  menu.kind = 'file'
+  menu.x = ev.clientX
+  menu.y = ev.clientY
+  menu.file = file
+}
+
+function openValueMenu(ev: MouseEvent, value: unknown) {
+  menu.show = true
+  menu.kind = 'value'
+  menu.x = ev.clientX
+  menu.y = ev.clientY
+  menu.value = fullValue(value)
 }
 
 function closeMenu() {
-  ctx.show = false
+  menu.show = false
+}
+
+async function copyValue() {
+  menu.show = false
+  const text = menu.value
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const host = document.createElement('textarea')
+    host.value = text
+    host.style.position = 'fixed'
+    host.style.opacity = '0'
+    document.body.appendChild(host)
+    host.select()
+    document.execCommand('copy')
+    host.remove()
+  }
 }
 
 async function remove() {
-  const file = ctx.file
-  ctx.show = false
+  const file = menu.file
+  menu.show = false
   if (!file) return
   if (!window.confirm(`Delete ${file.name}? Projects using it will lose the binary.`)) return
   try {
     await fileApi.delete([file.id])
     files.value = files.value.filter(f => f.id !== file.id)
+    if (selectedId.value === file.id) {
+      selectedId.value = null
+      records.value = []
+    }
   } catch {
     error.value = 'Delete failed.'
   }
@@ -246,96 +310,63 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 }
 
 .list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  padding-bottom: 4px;
 }
 
 .row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 10px;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 10px;
   font-size: 12px;
-  color: var(--akiba-chat-text-muted);
   cursor: default;
 }
 
 .row:hover {
-  background: var(--akiba-chat-hover);
-  color: var(--vscode-editor-foreground);
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.05));
 }
 
-/* The id is a reference, not a title: right aligned, low contrast, fenced by a hairline. */
-.id {
+.row.selected {
+  background: var(--vscode-focusBorder);
+  color: #fff;
+}
+
+.row.selected .id {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.row .id {
   flex: 0 0 auto;
-  min-width: 34px;
-  text-align: right;
   color: var(--akiba-chat-text-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.divider {
+.row .divider {
   flex: 0 0 auto;
   width: 1px;
   height: 11px;
   background: var(--vscode-panel-border);
 }
 
-.name {
-  flex: 1;
+.row .name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .more {
-  width: 100%;
-  padding: 6px;
-  background: transparent;
-  border: none;
-  color: var(--akiba-info-text);
+  margin: 6px 10px;
   font-size: 12px;
-  cursor: pointer;
 }
 
-.hint {
-  padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--akiba-chat-text-faint);
-}
-
-.hint.error {
-  color: var(--akiba-danger-text);
-}
-
-.ctx {
-  position: fixed;
-  z-index: 60;
-  padding: 4px 0;
-  min-width: 160px;
-  background: var(--vscode-editorWidget-background);
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: var(--akiba-radius-sm);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-  color: var(--vscode-editor-foreground);
-}
-
-.ctx-item {
-  padding: 5px 12px;
-  cursor: pointer;
-}
-
-.ctx-item.danger:hover {
-  background: var(--akiba-danger);
-  color: #fff;
-}
-
-/* The record panel: read it at a glance, change a value in place. */
 .detail {
-  flex: 0 0 auto;
-  max-height: 46%;
+  flex: 0 1 auto;
+  max-height: 52%;
   overflow: auto;
   border-top: 1px solid var(--vscode-panel-border);
   padding: 8px 10px 10px;
@@ -351,17 +382,41 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
   color: var(--vscode-editor-foreground);
 }
 
+.table-block {
+  margin-bottom: 6px;
+}
+
+.table-block > summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-descriptionForeground);
+  padding: 2px 0;
+}
+
+.table-count {
+  margin-left: 6px;
+  opacity: 0.7;
+}
+
+.row-block {
+  border-left: 1px solid var(--vscode-panel-border);
+  padding-left: 8px;
+  margin: 2px 0 6px;
+}
+
 .field {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 0;
+  padding: 1px 0;
   font-size: 12px;
-  min-height: 18px;
+  min-height: 17px;
 }
 
 .field .label {
-  flex: 0 0 84px;
+  flex: 0 0 108px;
   color: var(--vscode-descriptionForeground);
 }
 
@@ -383,9 +438,13 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
   border-bottom-color: var(--vscode-focusBorder);
 }
 
-.field .value.empty {
+.field .value.long {
   color: var(--akiba-chat-text-faint);
-  font-style: italic;
+}
+
+.field .length {
+  color: var(--akiba-chat-text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .edit-input {
@@ -400,12 +459,40 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
   outline: none;
 }
 
-.row.selected {
+.ctx {
+  position: fixed;
+  z-index: 60;
+  padding: 4px 0;
+  min-width: 150px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--akiba-radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+}
+
+.ctx-item {
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.ctx-item:hover {
   background: var(--vscode-focusBorder);
   color: #fff;
 }
 
-.row.selected .id {
-  color: rgba(255, 255, 255, 0.75);
+.ctx-item.danger {
+  color: var(--akiba-danger-text);
+}
+
+.hint {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--akiba-chat-text-faint);
+}
+
+.hint.error {
+  color: var(--akiba-danger-text);
 }
 </style>
