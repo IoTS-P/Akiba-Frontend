@@ -122,7 +122,7 @@ const menu = reactive({
 })
 
 /** Columns a correction must never rewrite: identity, size and what was imported. */
-const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path', 'processed_checksum'])
+const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path'])
 
 function rowId(row: RecordRow): number | null {
   const value = row.values['id']

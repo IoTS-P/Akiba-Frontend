@@ -79,7 +79,7 @@ const saving = ref(false)
 const edits = reactive(new Map<string, string>())
 const columnErrors = reactive<Record<string, string>>({})
 
-const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path', 'processed_checksum'])
+const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path'])
 
 const cellKey = (table: string, rowIndex: number, column: string) => `${table}.${rowIndex}.${column}`
 
