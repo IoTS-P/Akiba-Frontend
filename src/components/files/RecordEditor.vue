@@ -156,7 +156,8 @@ function placeholder(type: string): string {
   if (type.includes('timestamp')) return '2026-11-19T12:00:00+08:00'
   if (type.includes('date')) return '2026-11-19'
   if (type.includes('uuid')) return '00000000-0000-0000-0000-000000000000'
-  if (type.includes('ARRAY') || type.endsWith('[]')) return '["a", "b"]'
+  if (type.includes('ARRAY') || type.endsWith('[]')) return '{alpha,beta}'
+  if (type.includes('json')) return '{"k": "v"}'
   if (type.includes('bool')) return 'true / false'
   if (type.includes('int') || type.includes('numeric')) return '123'
   return ''
@@ -165,7 +166,9 @@ function placeholder(type: string): string {
 function hint(type: string): string {
   if (type.includes('timestamp')) return `${type} — ISO 8601 with offset; the database rejects anything else`
   if (type.includes('boolean')) return 'true or false'
-  if (type.includes('ARRAY') || type.endsWith('[]')) return 'JSON array'
+  if (type.includes('ARRAY') || type.endsWith('[]'))
+    return 'PostgreSQL array literal, e.g. {alpha,beta} — the database rejects anything else'
+  if (type.includes('json')) return 'JSON text; the database validates it'
   return type
 }
 
