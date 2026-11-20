@@ -55,12 +55,12 @@
               class="value"
               :class="{
                 editable: isEditable(table, row, column.name),
-                long: isLong(row[column.name]),
+                long: isLong(row, column.name),
               }"
-              :title="fullValue(row[column.name])"
+              :title="fullValue(row.values[column.name])"
               @click="isEditable(table, row, column.name) && startEdit(table.name, rowIndex, column.name, row)"
-              @contextmenu.prevent="openValueMenu($event, row[column.name])"
-            >{{ shortValue(row[column.name]) }}<span v-if="isLong(row[column.name])" class="length"> ({{ lengthOf(row[column.name]) }} chars)</span></span>
+              @contextmenu.prevent="openValueMenu($event, row.values[column.name])"
+            >{{ shortValue(row.values[column.name]) }}<span v-if="isLong(row, column.name)" class="length"> ({{ lengthOf(row, column.name) }} chars)</span></span>
           </div>
         </div>
       </details>
@@ -88,7 +88,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { fileApi, type FileEntry, type RecordTable } from '@/services/api'
+import { fileApi, type FileEntry, type RecordRow, type RecordTable } from '@/services/api'
 
 const PAGE = 50
 const SHORT_LIMIT = 200
@@ -121,24 +121,28 @@ const menu = reactive({
 /** Columns a correction must never rewrite: identity, size and what was imported. */
 const PROTECTED = new Set(['id', 'size', 'checksum', 'original_path', 'processed_checksum'])
 
-function rowId(row: Record<string, unknown>): number | null {
-  const value = row['id']
+function rowId(row: RecordRow): number | null {
+  const value = row.values['id']
   return typeof value === 'number' ? value : null
 }
 
-function isEditable(table: RecordTable, row: Record<string, unknown>, column: string): boolean {
+function isEditable(table: RecordTable, row: RecordRow, column: string): boolean {
   if (!canEdit.value) return false
   if (table.name === 'binaries' && PROTECTED.has(column)) return false
   return rowId(row) !== null
 }
 
-function lengthOf(value: unknown): number {
+/** The daemon cuts long cells and sends the real length beside the prefix. */
+function lengthOf(row: RecordRow, column: string): number {
+  const reported = row.lengths?.[column]
+  if (typeof reported === 'number') return reported
+  const value = row.values[column]
   if (value == null) return 0
   return typeof value === 'string' ? value.length : JSON.stringify(value).length
 }
 
-function isLong(value: unknown): boolean {
-  return lengthOf(value) > LONG_HINT
+function isLong(row: RecordRow, column: string): boolean {
+  return lengthOf(row, column) > LONG_HINT
 }
 
 function fullValue(value: unknown): string {
@@ -202,14 +206,14 @@ async function select(file: FileEntry) {
   }
 }
 
-function startEdit(table: string, rowIndex: number, column: string, row: Record<string, unknown>) {
+function startEdit(table: string, rowIndex: number, column: string, row: RecordRow) {
   editing.key = `${table}.${rowIndex}.${column}`
-  draft.value = row[column] == null ? '' : String(row[column])
+  draft.value = row.values[column] == null ? '' : String(row.values[column])
 }
 
 async function commitEdit(
   table: RecordTable,
-  row: Record<string, unknown>,
+  row: RecordRow,
   rowIndex: number,
   column: string,
 ) {
@@ -217,12 +221,12 @@ async function commitEdit(
   if (editing.key !== key) return
   const value = draft.value
   editing.key = ''
-  if (value === String(row[column] ?? '')) return
+  if (value === String(row.values[column] ?? '')) return
   const id = rowId(row)
   if (id === null) return
   try {
     await fileApi.updateRecord(table.name, id, column, value)
-    row[column] = value
+    row.values[column] = value
     saveError.value = ''
   } catch (e: any) {
     saveError.value = e?.response?.data?.error || 'Could not save that change.'

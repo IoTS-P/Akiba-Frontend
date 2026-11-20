@@ -404,10 +404,16 @@ export const fileApi = {
     api.patch<{ updated: boolean }>(`/records/${table}/${id}`, { column, value })
 }
 
+export interface RecordRow {
+  values: Record<string, unknown>
+  /** True length for cells the daemon had to shorten before sending. */
+  lengths?: Record<string, number>
+}
+
 export interface RecordTable {
   name: string
   columns: { name: string; type: string }[]
-  rows: Record<string, unknown>[]
+  rows: RecordRow[]
 }
 
 export interface BinaryDetail {
