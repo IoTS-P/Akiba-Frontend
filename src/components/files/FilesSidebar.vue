@@ -41,7 +41,10 @@
 
         <div v-for="(row, rowIndex) in table.rows" :key="rowIndex" class="row-block">
           <div v-for="column in table.columns" :key="column.name" class="field">
-            <span class="label">{{ column.name }}</span>
+            <span class="label" :title="column.type">
+              {{ column.name }}
+              <span class="type">{{ column.type }}</span>
+            </span>
 
             <input
               v-if="editing.key === `${table.name}.${rowIndex}.${column.name}`"
@@ -423,8 +426,18 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 }
 
 .field .label {
-  flex: 0 0 108px;
+  flex: 0 0 132px;
   color: var(--vscode-descriptionForeground);
+}
+
+/* The column type is part of the value's meaning: a date is not a string. */
+.field .type {
+  display: block;
+  font-size: 10px;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .field .value {
